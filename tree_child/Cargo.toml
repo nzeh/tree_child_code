@@ -1,0 +1,7 @@
+[package]
+name = "tree_child"
+version = "0.1.0"
+authors = ["Norbert Zeh <nzeh@cs.dal.ca>"]
+
+[dependencies]
+slab = "0.4.0"
