@@ -4,8 +4,8 @@
 //! has to be a multi-line text.  Each line encodes one of the trees in the forest.
 //!
 //! These functions take a mutable reference to tree builder as an argument.  This is an object
-//! implementing the `TreeBuilder` trait.  The parser is implemented purely in terms of the calling
-//! the methods of the `TreeBuilder` trait.
+//! implementing the `Builder` trait.  The parser is implemented purely in terms of the calling
+//! the methods of the `Builder` trait.
 //!
 //! The grammar for a a Newick string used by this parser is the following:
 //!
@@ -26,7 +26,7 @@
 //! in the context of computing tree-child hybridization networks.
 
 
-use tree::{TreeBuilder, TreeAccessor};
+use tree::{Builder, Accessor};
 use std::fmt::Write;
 use std::iter;
 use std::result;
@@ -51,19 +51,19 @@ struct Pos(usize, usize);
 
 
 /// Parse a given one-line Newick string using the given tree builder
-pub fn parse_tree<B: TreeBuilder>(builder: &mut B, newick: &str) -> Result<()> {
+pub fn parse_tree<B: Builder<String>>(builder: &mut B, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_tree()
 }
 
 
 /// Parse a given multi-line Newick string using the given tree builder
-pub fn parse_forest<B: TreeBuilder>(builder: &mut B, newick: &str) -> Result<()> {
+pub fn parse_forest<B: Builder<String>>(builder: &mut B, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_forest()
 }
 
 
 /// Struct representing the state of the Newick parser
-struct Parser<'b, 'i, B: 'b + TreeBuilder> {
+struct Parser<'b, 'i, B: 'b + Builder<String>> {
 
     /// The builder used to build the tree
     builder: &'b mut B,
@@ -75,7 +75,7 @@ struct Parser<'b, 'i, B: 'b + TreeBuilder> {
     chars: iter::Peekable<str::Chars<'i>>,
 }
 
-impl<'b, 'i, B: 'b + TreeBuilder> Parser<'b, 'i, B> {
+impl<'b, 'i, B: 'b + Builder<String>> Parser<'b, 'i, B> {
 
     /// Create a new parser that parses the given Newick string and uses the given builder to
     /// construct the corresponding tree.
@@ -242,10 +242,10 @@ impl<'b, 'i, B: 'b + TreeBuilder> Parser<'b, 'i, B> {
 
 
 /// Format a tree or forest into a Newick string
-pub fn format<R: TreeAccessor>(reader: &mut R) -> Option<String>  {
+pub fn format<R: Accessor<String>>(reader: &mut R) -> Option<String>  {
     let mut newick = String::new();
 
-    fn visit_node<R: TreeAccessor>(reader: &mut R, newick: &mut String, node: R::Node) -> Option<()> {
+    fn visit_node<R: Accessor<String>>(reader: &mut R, newick: &mut String, node: R::Node) -> Option<()> {
         if reader.is_leaf(node) {
             newick.write_str(&reader.label(node)?).unwrap();
         } else {
@@ -331,7 +331,7 @@ mod tests {
         }
     }
 
-    impl TreeBuilder for TestBuilder {
+    impl Builder for TestBuilder {
         
         type Node = usize;
 
@@ -404,7 +404,7 @@ mod tests {
         }
     }
 
-    impl TreeAccessor for TestAccessor {
+    impl Accessor for TestAccessor {
         
         type Node = usize;
 

@@ -69,7 +69,7 @@ impl<'a, T: 'a> LeafLabeller<'a, T> {
         LeafLabeller {
             tree,
             count:     0,
-            intervals: vec![(0, 0); tree.node_count()],
+            intervals: vec![Default::default(); tree.node_count()],
         }
     }
 
@@ -82,6 +82,7 @@ impl<'a, T: 'a> LeafLabeller<'a, T> {
     /// Traverse the subtree rooted at the given node to compute the intervals of the nodes in this
     /// subtree
     fn traverse(&mut self, node: Node) {
+
         match self.tree[node] {
             
             // The number of a leaf is the next available number
@@ -179,7 +180,9 @@ impl<'a, T: 'a> LcaMapper<'a, T> {
             // this path jump right up to its top
             let mut on_path = first_buddy;
             while on_path != buddy {
+                let next_on_path = self.parents[on_path.id()].unwrap();
                 self.parents[on_path.id()] = Some(buddy);
+                on_path = next_on_path;
             }
 
             // Store the computed image of the current node

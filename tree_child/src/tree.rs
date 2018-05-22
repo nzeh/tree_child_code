@@ -2,50 +2,6 @@ use std::ops::Index;
 use std::slice;
 
 
-/// A tree builder trait used by the Newick parser and other parts of the code to construct a tree
-/// or forest.
-pub trait TreeBuilder {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// Allocate a new tree
-    fn new_tree(&mut self);
-
-    /// Create a new leaf in the current tree
-    fn new_leaf(&mut self, label: String) -> Self::Node;
-
-    /// Create a new internal node with the given set of children in the current tree.
-    fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
-
-    /// Finish the construction of this tree and make the given node its root.
-    fn finish_tree(&mut self, root: Self::Node);
-}
-
-
-/// A tree accessor trait used by the Newick writer and other parts of the code to explore a tree.
-pub trait TreeAccessor {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// An iterator type for iterating over the children of a node
-    type Children: Iterator<Item=Self::Node>;
-
-    /// Access the root of the next tree
-    fn root(&mut self) -> Option<Self::Node>;
-
-    /// Access the children of a node
-    fn children(&self, node: Self::Node) -> Self::Children;
-
-    /// Access the node's label, None if it's not a leaf.
-    fn label(&self, node: Self::Node) -> Option<&str>;
-
-    /// Is this node a leaf?
-    fn is_leaf(&self, node: Self::Node) -> bool;
-}
-
-
 /// A phylogenetic tree whose leaves have `usize` labels
 pub struct Tree<T> {
 
@@ -330,3 +286,139 @@ impl<'a, T: 'a> Iterator for ChildIter<'a, T> {
         })
     }
 }
+
+
+/// A tree builder trait used by the Newick parser and other parts of the code to construct a tree
+/// or forest.
+pub trait Builder<T> {
+
+    /// The node type for the tree
+    type Node: Clone + Copy;
+
+    /// Allocate a new tree
+    fn new_tree(&mut self);
+
+    /// Create a new leaf in the current tree
+    fn new_leaf(&mut self, label: T) -> Self::Node;
+
+    /// Create a new internal node with the given set of children in the current tree.
+    fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
+
+    /// Finish the construction of this tree and make the given node its root.
+    fn finish_tree(&mut self, root: Self::Node);
+}
+
+
+/// Concrete implementation of the `TreeBuilder` trait
+pub struct TreeBuilder<T> {
+
+    // The current tree under construction
+    current_tree: Option<Tree<T>>,
+
+    // The set of trees already constructed
+    trees: Vec<Tree<T>>,
+}
+
+
+impl<T> TreeBuilder<T> {
+
+    /// Create a new TreeBuilder
+    pub fn new() -> TreeBuilder<T> {
+        TreeBuilder {
+            current_tree: None,
+            trees:        vec![],
+        }
+    }
+}
+
+
+impl<T> Builder<T> for TreeBuilder<T> {
+
+    type Node = Node;
+
+    fn new_tree(&mut self) {
+        self.current_tree = Some(Tree::new());
+    }
+
+    fn new_leaf(&mut self, label: T) -> Node {
+        self.current_tree.as_mut().map(|t| {
+            let leaf_id = Leaf(t.leaves.len());
+            let node_id = Node(t.nodes.len());
+            t.leaves.push(node_id);
+            t.nodes.push(NodeData::Leaf(LeafData {
+                parent: None,
+                left:   None,
+                right:  None,
+                label,
+                id:     leaf_id,
+            }));
+            t.node_count += 1;
+            node_id
+        }).unwrap()
+    }
+
+    fn new_node(&mut self, children: Vec<Node>) -> Node {
+        self.current_tree.as_mut().map(|t| {
+            let node_id = Node(t.nodes.len());
+            t.nodes.push(NodeData::Internal(InternalNodeData {
+                parent:      None,
+                left:        None,
+                right:       None,
+                first_child: children[0],
+            }));
+            let mut last = None;
+            for child in children.into_iter() {
+                match t.nodes[child.id()] {
+                    NodeData::Internal(ref mut data) => {
+                        data.left   = last;
+                        data.parent = Some(node_id);
+                    },
+                    NodeData::Leaf(ref mut data) => {
+                        data.left   = last;
+                        data.parent = Some(node_id);
+                    },
+                }
+                if let Some(node) = last {
+                    match t.nodes[node.id()] {
+                        NodeData::Internal(ref mut data) => data.right = Some(child),
+                        NodeData::Leaf(ref mut data)     => data.right = Some(child),
+                    }
+                }
+                last = Some(child);
+            }
+            t.node_count += 1;
+            node_id
+        }).unwrap()
+    }
+
+    fn finish_tree(&mut self, root: Node) {
+        self.current_tree.as_mut().map(|t| t.root = Some(root));
+        self.trees.push(self.current_tree.take().unwrap());
+    }
+}
+
+
+/// A tree accessor trait used by the Newick writer and other parts of the code to explore a tree.
+pub trait Accessor<T> {
+
+    /// The node type for the tree
+    type Node: Clone + Copy;
+
+    /// An iterator type for iterating over the children of a node
+    type Children: Iterator<Item=Self::Node>;
+
+    /// Access the root of the next tree
+    fn root(&mut self) -> Option<Self::Node>;
+
+    /// Access the children of a node
+    fn children(&self, node: Self::Node) -> Self::Children;
+
+    /// Access the node's label, None if it's not a leaf.
+    fn label(&self, node: Self::Node) -> Option<&T>;
+
+    /// Is this node a leaf?
+    fn is_leaf(&self, node: Self::Node) -> bool;
+}
+
+
+
