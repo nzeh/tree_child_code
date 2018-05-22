@@ -2,6 +2,50 @@ use std::ops::Index;
 use std::slice;
 
 
+/// A tree builder trait used by the Newick parser and other parts of the code to construct a tree
+/// or forest.
+pub trait TreeBuilder {
+
+    /// The node type for the tree
+    type Node: Clone + Copy;
+
+    /// Allocate a new tree
+    fn new_tree(&mut self);
+
+    /// Create a new leaf in the current tree
+    fn new_leaf(&mut self, label: String) -> Self::Node;
+
+    /// Create a new internal node with the given set of children in the current tree.
+    fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
+
+    /// Finish the construction of this tree and make the given node its root.
+    fn finish_tree(&mut self, root: Self::Node);
+}
+
+
+/// A tree accessor trait used by the Newick writer and other parts of the code to explore a tree.
+pub trait TreeAccessor {
+
+    /// The node type for the tree
+    type Node: Clone + Copy;
+
+    /// An iterator type for iterating over the children of a node
+    type Children: Iterator<Item=Self::Node>;
+
+    /// Access the root of the next tree
+    fn root(&mut self) -> Option<Self::Node>;
+
+    /// Access the children of a node
+    fn children(&self, node: Self::Node) -> Self::Children;
+
+    /// Access the node's label, None if it's not a leaf.
+    fn label(&self, node: Self::Node) -> Option<&str>;
+
+    /// Is this node a leaf?
+    fn is_leaf(&self, node: Self::Node) -> bool;
+}
+
+
 /// A phylogenetic tree whose leaves have `usize` labels
 pub struct Tree<T> {
 

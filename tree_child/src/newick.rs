@@ -26,30 +26,11 @@
 //! in the context of computing tree-child hybridization networks.
 
 
+use tree::{TreeBuilder, TreeAccessor};
 use std::fmt::Write;
 use std::iter;
 use std::result;
 use std::str;
-
-
-/// The set of operations the parser uses to build a tree or forest from a Newick string.
-pub trait TreeBuilder {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// Allocate a new tree
-    fn new_tree(&mut self);
-
-    /// Create a new leaf in the current tree
-    fn new_leaf(&mut self, label: String) -> Self::Node;
-
-    /// Create a new internal node with the given set of children in the current tree.
-    fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
-
-    /// Finish the construction of this tree and make the given node its root.
-    fn finish_tree(&mut self, root: Self::Node);
-}
 
 
 /// The parser's result type
@@ -257,30 +238,6 @@ impl<'b, 'i, B: 'b + TreeBuilder> Parser<'b, 'i, B> {
             pos:     self.pos,
         })
     }
-}
-
-
-
-/// The set of operations used to inspect a tree
-pub trait TreeAccessor {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// An iterator type for iterating over the children of a node
-    type Children: Iterator<Item=Self::Node>;
-
-    /// Access the root of the next tree
-    fn root(&mut self) -> Option<Self::Node>;
-
-    /// Access the children of a node
-    fn children(&self, node: Self::Node) -> Self::Children;
-
-    /// Access the node's label, None if it's not a leaf.
-    fn label(&self, node: Self::Node) -> Option<&str>;
-
-    /// Is this node a leaf?
-    fn is_leaf(&self, node: Self::Node) -> bool;
 }
 
 
