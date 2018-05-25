@@ -1,5 +1,111 @@
-use std::ops::Index;
 use std::slice;
+
+
+/// The traits for interacting with trees
+pub mod traits {
+
+    /// The trait that needs to be implemented by identifier types
+    pub trait Id {
+
+        /// Create an ID corresponding to the given integer
+        fn new(id: usize) -> Self;
+
+        /// Access the integer wrapped by the ID
+        fn id(self) -> usize;
+    }
+
+    /// A tree accessor trait used by the Newick writer and other parts of the code to explore a
+    /// tree.
+    pub trait Tree<'a, T: 'a> {
+
+        /// The node type for the tree
+        type Node: Clone + Copy + Id + PartialEq;
+
+        /// The type used to identify leaves
+        type Leaf: Clone + Copy + Id + PartialEq;
+
+        /// An iterator over the nodes of the tree
+        type NodeIter: Iterator<Item=Self::Node>;
+
+        /// An iterator over the leaves of the tree
+        type LeafIter: Iterator<Item=Self::Node>;
+
+        /// An iterator over the children of a node
+        type ChildIter: Iterator<Item=Self::Node>;
+
+        /// Create a new tree
+        fn new() -> Self;
+
+        /// Access the number of nodes in the tree
+        fn node_count(&'a self) -> usize;
+
+        /// Access the root of the next tree
+        fn root(&'a self) -> Option<Self::Node>;
+
+        /// Access the nodes of the tree
+        fn nodes(&'a self) -> Self::NodeIter;
+
+        /// Access the leaves of the tree
+        fn leaves(&'a self) -> Self::LeafIter;
+
+        /// Access the children of a node
+        fn children(&'a self, node: Self::Node) -> Self::ChildIter;
+
+        /// Access the parent of a node
+        fn parent(&'a self, node: Self::Node) -> Option<Self::Node>;
+
+        /// Access the left sibling of a node
+        fn left(&'a self, node: Self::Node) -> Option<Self::Node>;
+
+        /// Access the right sibling of a node
+        fn right(&'a self, node: Self::Node) -> Option<Self::Node>;
+
+        /// Is this node a leaf?
+        fn is_leaf(&'a self, node: Self::Node) -> bool;
+
+        /// Access the leaf's ID
+        fn leaf_id(&'a self, node: Self::Node) -> Option<Self::Leaf>;
+
+        /// Access the leaf's label
+        fn label(&'a self, node: Self::Node) -> Option<&'a T>;
+
+        /// Access the node identified by a given leaf ID
+        fn leaf(&'a self, leaf: Self::Leaf) -> Self::Node;
+    }
+
+    /// A tree builder trait used by the Newick parser and other parts of the code to construct a
+    /// tree or forest.
+    pub trait TreeBuilder<'a, T> {
+
+        /// The node type for the tree
+        type Node: Clone + Copy;
+
+        /// The tree type being constructed
+        type Tree;
+
+        /// Create a new tree builder
+        fn new() -> Self;
+
+        /// Allocate a new tree
+        fn new_tree(&'a mut self);
+
+        /// Create a new leaf in the current tree
+        fn new_leaf(&'a mut self, label: T) -> Self::Node;
+
+        /// Create a new internal node with the given set of children in the current tree.
+        fn new_node(&'a mut self, children: Vec<Self::Node>) -> Self::Node;
+
+        /// Finish the construction of this tree and make the given node its root.
+        fn finish_tree(&'a mut self, root: Self::Node);
+
+        /// Retrieve the constructed trees
+        fn trees(self) -> Vec<Self::Tree>;
+    }
+}
+
+
+use tree::traits::Id;
+use tree::traits::Tree as TreeTrait;
 
 
 /// A phylogenetic tree whose leaves have `usize` labels
@@ -19,48 +125,31 @@ pub struct Tree<T> {
 }
 
 
-impl<T> Tree<T> {
+/// The data associated with a node
+struct NodeData<T> {
 
-    /// Create a new tree
-    pub fn new() -> Tree<T> {
-        Tree {
-            nodes:      vec![],
-            root:       None,
-            leaves:     vec![],
-            node_count: 0,
-        }
-    }
+    /// Parent
+    parent: Option<Node>,
 
-    /// The number of nodes in the tree
-    pub fn node_count(&self) -> usize {
-        self.node_count
-    }
+    /// Left sibling
+    left: Option<Node>,
 
-    /// The root node of the tree
-    pub fn root(&self) -> Option<Node> {
-        self.root
-    }
+    /// Right sibling
+    right: Option<Node>,
 
-    /// Iterator over the nodes of the tree
-    pub fn nodes(&self) -> NodeIter<T> {
-        NodeIter { iter: self.nodes.iter() }
-    }
+    /// The leaf- or internal-node-specific data
+    data: TypedNodeData<T>,
+}
 
-    /// Iterator over the leaves of the tree
-    pub fn leaves(&self) -> LeafIter<T> {
-        LeafIter {
-            tree: self,
-            iter: self.leaves.iter(),
-        }
-    }
 
-    /// Iterator over the children of a node
-    pub fn children(&self, node: &InternalNodeData) -> ChildIter<T> {
-        ChildIter {
-            tree:  self,
-            child: Some(node.first_child),
-        }
-    }
+/// The part of the node data that's specific to leaves or internal nodes.
+enum TypedNodeData<T> {
+
+    /// An leaf has an ID of type `Leaf` and a label of type `T`.
+    Leaf(Leaf, T),
+
+    /// An internal node has a child.
+    Internal(Node),
 }
 
 
@@ -69,202 +158,20 @@ impl<T> Tree<T> {
 pub struct Node(usize);
 
 
-impl Node {
-
-    /// Access the ID of this node
-    pub fn id(self) -> usize {
-        self.0
-    }
-}
-
-
-/// Indexing into a tree using a `Node` returns the corresponding node data
-impl<T> Index<Node> for Tree<T> {
-
-    type Output = NodeData<T>;
-
-    fn index(&self, index: Node) -> &NodeData<T> {
-        &self.nodes[index.id()]
-    }
-}
-
-
+/// The type used to refer to leaves
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub struct Leaf(usize);
 
 
-impl Leaf {
-
-    /// Access the ID of this leaf
-    pub fn id(self) -> usize {
-        self.0
-    }
-}
-
-
-/// Indexing into a tree using a `Leaf` returns the corresponding `Node`
-impl<T> Index<Leaf> for Tree<T> {
-
-    type Output = Node;
-
-    fn index(&self, index: Leaf) -> &Node {
-        &self.leaves[index.id()]
-    }
-}
-
-
-/// The data associated with a node
-pub enum NodeData<T> {
-    Leaf(LeafData<T>),
-    Internal(InternalNodeData),
-}
-
-
-impl<T> NodeData<T> {
-
-    /// Access the parent of the current node
-    pub fn parent(&self) -> Option<Node> {
-        match self {
-            NodeData::Leaf(info)     => info.parent(),
-            NodeData::Internal(info) => info.parent(),
-        }
-    }
-
-    /// Access the left sibling of the current node
-    pub fn left(&self) -> Option<Node> {
-        match self {
-            NodeData::Leaf(info)     => info.left(),
-            NodeData::Internal(info) => info.left(),
-        }
-    }
-
-    /// Access the right sibling of the current node
-    pub fn right(&self) -> Option<Node> {
-        match self {
-            NodeData::Leaf(info)     => info.right(),
-            NodeData::Internal(info) => info.right(),
-        }
-    }
-}
-
-
-/// The info associated with a leaf
-pub struct LeafData<T> {
-
-    /// Parent
-    parent: Option<Node>,
-
-    /// Left sibling
-    left: Option<Node>,
-
-    /// Right sibling
-    right: Option<Node>,
-
-    /// The leaf's label
-    label: T,
-
-    /// The leaf's ID
-    id: Leaf,
-}
-
-impl<T> LeafData<T> {
-
-    /// Access the parent of this leaf
-    pub fn parent(&self) -> Option<Node> {
-        self.parent
-    }
-
-    /// Access the left sibling of this leaf
-    pub fn left(&self) -> Option<Node> {
-        self.left
-    }
-
-    /// Access the right sibling of this leaf
-    pub fn right(&self) -> Option<Node> {
-        self.right
-    }
-
-    /// Access the leaf's ID
-    pub fn id(&self) -> Leaf {
-        self.id
-    }
-}
-
-
-/// The info associated with an internal node
-pub struct InternalNodeData {
-
-    /// Parent
-    parent: Option<Node>,
-
-    /// Left sibling
-    left: Option<Node>,
-
-    /// Right sibling
-    right: Option<Node>,
-
-    /// The first child of this node
-    first_child: Node,
-}
-
-
-impl InternalNodeData {
-
-    /// Access the parent of this internal node
-    pub fn parent(&self) -> Option<Node> {
-        self.parent
-    }
-
-    /// Access the left sibling of this internal node
-    pub fn left(&self) -> Option<Node> {
-        self.left
-    }
-
-    /// Access the right sibling of this internal node
-    pub fn right(&self) -> Option<Node> {
-        self.right
-    }
-}
-
-
 /// An iterator over the nodes of a tree
-pub struct NodeIter<'a, T: 'a> {
-    iter: slice::Iter<'a, NodeData<T>>,
+pub struct NodeIter {
+    node: usize,
+    end:  usize,
 }
-
-
-impl<'a, T: 'a> Iterator for NodeIter<'a, T> {
-
-    type Item = &'a NodeData<T>;
-
-    fn next(&mut self) -> Option<&'a NodeData<T>> {
-        self.iter.next()
-    }
-}
-
 
 /// An iterator over the leaves of a tree
-pub struct LeafIter<'a, T: 'a> {
-    tree: &'a Tree<T>,
+pub struct LeafIter<'a> {
     iter: slice::Iter<'a, Node>,
-}
-
-
-impl <'a, T: 'a> Iterator for LeafIter<'a, T> {
-
-    type Item = &'a LeafData<T>;
-
-    fn next(&mut self) -> Option<&'a LeafData<T>> {
-        match self.iter.next() {
-            None => None,
-            Some(&leaf) => {
-                match self.tree[leaf] {
-                    NodeData::Leaf(ref data) => Some(data),
-                    _                        => None,
-                }
-            }
-        }
-    }
 }
 
 
@@ -275,37 +182,171 @@ pub struct ChildIter<'a, T: 'a> {
 }
 
 
+impl traits::Id for Node {
+
+    fn new(id: usize) -> Self {
+        Node(id)
+    }
+
+    fn id(self) -> usize {
+        self.0
+    }
+}
+
+
+impl traits::Id for Leaf {
+
+    fn new(id: usize) -> Self {
+        Leaf(id)
+    }
+
+    fn id(self) -> usize {
+        self.0
+    }
+}
+
+
+impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
+
+    type Node = Node;
+
+    type Leaf = Leaf;
+
+    type NodeIter = NodeIter;
+
+    type LeafIter = LeafIter<'a>;
+
+    type ChildIter = ChildIter<'a, T>;
+
+    fn new() -> Self {
+        Tree {
+            nodes:      vec![],
+            root:       None,
+            leaves:     vec![],
+            node_count: 0,
+        }
+    }
+
+    fn node_count(&'a self) -> usize {
+        self.node_count
+    }
+
+    fn root(&'a self) -> Option<Node> {
+        self.root
+    }
+
+    fn nodes(&'a self) -> NodeIter {
+        NodeIter {
+            node: 0,
+            end:  self.nodes.len(),
+        }
+    }
+
+    fn leaves(&'a self) -> LeafIter<'a> {
+        LeafIter {
+            iter: self.leaves.iter(),
+        }
+    }
+
+    fn children(&'a self, node: Node) -> ChildIter<'a, T> {
+        ChildIter {
+            tree:  self,
+            child: match self.node(node).data {
+                TypedNodeData::Internal(child) => Some(child),
+                _                              => None,
+            },
+        }
+    }
+
+    fn parent(&'a self, node: Node) -> Option<Node> {
+        self.node(node).parent
+    }
+
+    fn left(&'a self, node: Node) -> Option<Node> {
+        self.node(node).left
+    }
+
+    fn right(&'a self, node: Node) -> Option<Node> {
+        self.node(node).right
+    }
+
+    fn is_leaf(&'a self, node: Node) -> bool {
+        match self.node(node).data {
+            TypedNodeData::Leaf(_, _) => true,
+            _                         => false,
+        }
+    }
+
+    fn leaf_id(&'a self, node: Node) -> Option<Leaf> {
+        match self.node(node).data {
+            TypedNodeData::Leaf(id, _) => Some(id),
+            _                          => None,
+        }
+    }
+
+    fn label(&'a self, node: Node) -> Option<&'a T> {
+        match self.node(node).data {
+            TypedNodeData::Leaf(_, ref label) => Some(label),
+            _                                 => None,
+        }
+    }
+
+    fn leaf(&'a self, leaf: Leaf) -> Node {
+        self.leaves[leaf.id()]
+    }
+}
+
+
+impl<T> Tree<T> {
+
+    /// Access the node data for the given node
+    fn node(&self, node: Node) -> &NodeData<T> {
+        &self.nodes[node.id()]
+    }
+
+    /// Access the node data mutably
+    fn node_mut(&mut self, node: Node) -> &mut NodeData<T> {
+        &mut self.nodes[node.id()]
+    }
+
+}
+
+
+impl Iterator for NodeIter {
+
+    type Item = Node;
+
+    fn next(&mut self) -> Option<Node> {
+        if self.node < self.end {
+            self.node += 1;
+            Some(Node::new(self.node - 1))
+        } else {
+            None
+        }
+    }
+}
+
+
+impl<'a> Iterator for LeafIter<'a> {
+
+    type Item = Node;
+
+    fn next(&mut self) -> Option<Node> {
+        self.iter.next().map(|t| *t)
+    }
+}
+
+
 impl<'a, T: 'a> Iterator for ChildIter<'a, T> {
 
     type Item = Node;
 
     fn next(&mut self) -> Option<Node> {
         self.child.map(|node| {
-            self.child = self.tree[node].right();
+            self.child = self.tree.node(node).right;
             node
         })
     }
-}
-
-
-/// A tree builder trait used by the Newick parser and other parts of the code to construct a tree
-/// or forest.
-pub trait Builder<T> {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// Allocate a new tree
-    fn new_tree(&mut self);
-
-    /// Create a new leaf in the current tree
-    fn new_leaf(&mut self, label: T) -> Self::Node;
-
-    /// Create a new internal node with the given set of children in the current tree.
-    fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
-
-    /// Finish the construction of this tree and make the given node its root.
-    fn finish_tree(&mut self, root: Self::Node);
 }
 
 
@@ -320,105 +361,67 @@ pub struct TreeBuilder<T> {
 }
 
 
-impl<T> TreeBuilder<T> {
+impl<'a, T: 'a> traits::TreeBuilder<'a, T> for TreeBuilder<T> {
 
-    /// Create a new TreeBuilder
-    pub fn new() -> TreeBuilder<T> {
+    type Node = Node;
+
+    type Tree = Tree<T>;
+
+    fn new() -> Self {
         TreeBuilder {
             current_tree: None,
             trees:        vec![],
         }
     }
-}
-
-
-impl<T> Builder<T> for TreeBuilder<T> {
-
-    type Node = Node;
-
-    fn new_tree(&mut self) {
+    fn new_tree(&'a mut self) {
         self.current_tree = Some(Tree::new());
     }
 
-    fn new_leaf(&mut self, label: T) -> Node {
+    fn new_leaf(&'a mut self, label: T) -> Node {
         self.current_tree.as_mut().map(|t| {
-            let leaf_id = Leaf(t.leaves.len());
-            let node_id = Node(t.nodes.len());
-            t.leaves.push(node_id);
-            t.nodes.push(NodeData::Leaf(LeafData {
+            let leaf = Leaf(t.leaves.len());
+            let node = Node(t.nodes.len());
+            t.leaves.push(node);
+            t.nodes.push(NodeData {
                 parent: None,
                 left:   None,
                 right:  None,
-                label,
-                id:     leaf_id,
-            }));
+                data:   TypedNodeData::Leaf(leaf, label),
+            });
             t.node_count += 1;
-            node_id
+            node
         }).unwrap()
     }
 
-    fn new_node(&mut self, children: Vec<Node>) -> Node {
+    fn new_node(&'a mut self, children: Vec<Node>) -> Node {
         self.current_tree.as_mut().map(|t| {
-            let node_id = Node(t.nodes.len());
-            t.nodes.push(NodeData::Internal(InternalNodeData {
-                parent:      None,
-                left:        None,
-                right:       None,
-                first_child: children[0],
-            }));
+            let node = Node(t.nodes.len());
+            t.nodes.push(NodeData {
+                parent: None,
+                left:   None,
+                right:  None,
+                data:   TypedNodeData::Internal(children[0]),
+            });
             let mut last = None;
             for child in children.into_iter() {
-                match t.nodes[child.id()] {
-                    NodeData::Internal(ref mut data) => {
-                        data.left   = last;
-                        data.parent = Some(node_id);
-                    },
-                    NodeData::Leaf(ref mut data) => {
-                        data.left   = last;
-                        data.parent = Some(node_id);
-                    },
-                }
+                t.node_mut(child).left   = last;
+                t.node_mut(child).parent = Some(node);
                 if let Some(node) = last {
-                    match t.nodes[node.id()] {
-                        NodeData::Internal(ref mut data) => data.right = Some(child),
-                        NodeData::Leaf(ref mut data)     => data.right = Some(child),
-                    }
+                    t.node_mut(node).right = Some(child);
                 }
                 last = Some(child);
             }
             t.node_count += 1;
-            node_id
+            node
         }).unwrap()
     }
 
-    fn finish_tree(&mut self, root: Node) {
+    fn finish_tree(&'a mut self, root: Node) {
         self.current_tree.as_mut().map(|t| t.root = Some(root));
         self.trees.push(self.current_tree.take().unwrap());
     }
+
+    fn trees(self) -> Vec<Self::Tree> {
+        self.trees
+    }
 }
-
-
-/// A tree accessor trait used by the Newick writer and other parts of the code to explore a tree.
-pub trait Accessor<T> {
-
-    /// The node type for the tree
-    type Node: Clone + Copy;
-
-    /// An iterator type for iterating over the children of a node
-    type Children: Iterator<Item=Self::Node>;
-
-    /// Access the root of the next tree
-    fn root(&mut self) -> Option<Self::Node>;
-
-    /// Access the children of a node
-    fn children(&self, node: Self::Node) -> Self::Children;
-
-    /// Access the node's label, None if it's not a leaf.
-    fn label(&self, node: Self::Node) -> Option<&T>;
-
-    /// Is this node a leaf?
-    fn is_leaf(&self, node: Self::Node) -> bool;
-}
-
-
-
