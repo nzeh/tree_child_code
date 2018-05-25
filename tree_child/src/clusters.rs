@@ -30,10 +30,11 @@ pub enum LoC<T> {
 /// Partition the input trees into clusters.  In the output, the clusters are arranged bottom-up,
 /// that is, the cluster containing the leaf representing another cluster C follows C in the
 /// cluster sequence.
-pub fn partition<Label, T, C>(trees: Vec<T>) -> Vec<Vec<C>>
+pub fn partition<Label, T, C, B>(trees: Vec<T>) -> Vec<Vec<C>>
     where for<'a> Label: 'a,
           for<'a> T:     'a + Tree<'a, Label>,
-          for<'a> C:     'a + Tree<'a, LoC<Label>> {
+          for<'a> C:     'a + Tree<'a, LoC<Label>>,
+          for<'a> B:     'a + TreeBuilder<'a, LoC<Label>, Tree=C> {
 
     let (num_clusters, cluster_nodes) = {
 
@@ -53,7 +54,7 @@ pub fn partition<Label, T, C>(trees: Vec<T>) -> Vec<Vec<C>>
     };
 
     // Decompose the trees into clusters
-    decompose_trees(trees, num_clusters, cluster_nodes)
+    decompose_trees::<Label, T, C, B>(trees, num_clusters, cluster_nodes)
 }
 
 
@@ -272,11 +273,11 @@ fn decompose_trees<Label, T, C, B>(
 
 
 /// The state of the cluster decomposition process
-struct Decomposer<Label, T, C, B>
-    where for<'a> Label: 'a,
-          for<'a> T:     'a + Tree<'a, Label>,
-          for<'a> C:     'a + Tree<'a, LoC<Label>>,
-          for<'a> B:     'a + TreeBuilder<'a, LoC<Label>, Tree=C> {
+struct Decomposer<'a, Label, T, C, B>
+    where Label: 'a,
+          T:     'a + Tree<'a, Label>,
+          C:     'a + Tree<'a, LoC<Label>>,
+          B:     'a + TreeBuilder<'a, LoC<Label>, Tree=C> {
 
     /// Tree builders used to build the trees in the different clusters
     builders: Vec<B>,
@@ -286,14 +287,18 @@ struct Decomposer<Label, T, C, B>
 
     /// The cluster nodes of the current tree
     cluster_nodes: Vec<Option<usize>>,
+
+    phantom: PhantomData<&'a Label>,
 }
 
 
-impl<Label, T, C, B> Decomposer<Label, T, C, B>
-    where for<'a> Label: 'a,
-          for<'a> T:     'a + Tree<'a, Label>,
-          for<'a> C:     'a + Tree<'a, LoC<Label>>,
-          for<'a> B:     'a + TreeBuilder<'a, LoC<Label>, Tree=C> {
+impl<'a, Label, TNode, CNode, T, C, B> Decomposer<'a, Label, T, C, B>
+    where Label: 'a,
+          TNode: Clone + Copy + Id + PartialEq,
+          CNode: Clone + Copy + Id + PartialEq,
+          T:     'a + Tree<'a, Label, Node=TNode>,
+          C:     'a + Tree<'a, LoC<Label>, Node=CNode>,
+          B:     'a + TreeBuilder<'a, LoC<Label>, Tree=C> {
 
     /// Construct a new decomposer capable of building num_clusters + 1 clusters
     fn new(num_clusters: usize) -> Self {
@@ -317,7 +322,7 @@ impl<Label, T, C, B> Decomposer<Label, T, C, B>
     }
 
     /// Traverse the tree from the given node
-    fn traverse(&mut self, node: T::Node, cluster: Option<usize>) -> C::Node {
+    fn traverse(&mut self, node: TNode, cluster: Option<usize>) -> CNode {
 
         if self.tree.is_leaf(node) {
 
