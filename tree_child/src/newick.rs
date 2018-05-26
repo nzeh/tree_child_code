@@ -26,7 +26,7 @@
 //! in the context of computing tree-child hybridization networks.
 
 
-use tree::{Builder, Accessor};
+use tree::traits::{Tree, TreeBuilder};
 use std::fmt::Write;
 use std::iter;
 use std::result;
@@ -51,19 +51,21 @@ struct Pos(usize, usize);
 
 
 /// Parse a given one-line Newick string using the given tree builder
-pub fn parse_tree<B: Builder<String>>(builder: &mut B, newick: &str) -> Result<()> {
+pub fn parse_tree<B>(builder: &mut B, newick: &str) -> Result<()>
+    where B: TreeBuilder<String> {
     Parser::new(builder, newick).parse_tree()
 }
 
 
 /// Parse a given multi-line Newick string using the given tree builder
-pub fn parse_forest<B: Builder<String>>(builder: &mut B, newick: &str) -> Result<()> {
+pub fn parse_forest<B>(builder: &mut B, newick: &str) -> Result<()>
+    where B: TreeBuilder<String> {
     Parser::new(builder, newick).parse_forest()
 }
 
 
 /// Struct representing the state of the Newick parser
-struct Parser<'b, 'i, B: 'b + Builder<String>> {
+struct Parser<'b, 'i, B: 'b + TreeBuilder<String>> {
 
     /// The builder used to build the tree
     builder: &'b mut B,
@@ -75,7 +77,8 @@ struct Parser<'b, 'i, B: 'b + Builder<String>> {
     chars: iter::Peekable<str::Chars<'i>>,
 }
 
-impl<'b, 'i, B: 'b + Builder<String>> Parser<'b, 'i, B> {
+impl<'b, 'i, B> Parser<'b, 'i, B>
+    where B: 'b + TreeBuilder<String> {
 
     /// Create a new parser that parses the given Newick string and uses the given builder to
     /// construct the corresponding tree.
@@ -241,28 +244,30 @@ impl<'b, 'i, B: 'b + Builder<String>> Parser<'b, 'i, B> {
 }
 
 
-/// Format a tree or forest into a Newick string
-pub fn format<R: Accessor<String>>(reader: &mut R) -> Option<String>  {
+/// Format a tree into a Newick string
+pub fn format_tree<T>(tree: &T) -> Option<String>
+    where for<'t> T: Tree<'t, String> {
     let mut newick = String::new();
 
-    fn visit_node<R: Accessor<String>>(reader: &mut R, newick: &mut String, node: R::Node) -> Option<()> {
-        if reader.is_leaf(node) {
-            newick.write_str(&reader.label(node)?).unwrap();
+    fn visit_node<'t, T>(tree: &'t T, newick: &mut String, node: T::Node) -> Option<()>
+        where T: 't + Tree<'t, String> {
+        if tree.is_leaf(node) {
+            newick.write_str(&tree.label(node)?).unwrap();
         } else {
             newick.write_char('(').unwrap();
-            let mut children = reader.children(node);
-            visit_node(reader, newick, children.next()?);
+            let mut children = tree.children(node);
+            visit_node(tree, newick, children.next()?);
             for child in children {
                 newick.write_char(',').unwrap();
-                visit_node(reader, newick, child);
+                visit_node(tree, newick, child);
             }
             newick.write_char(')').unwrap();
         }
         Some(())
     };
 
-    while let Some(root) = reader.root() {
-        visit_node(reader, &mut newick, root)?;
+    while let Some(root) = tree.root() {
+        visit_node(tree, &mut newick, root)?;
         newick.write_str(";\n").unwrap();
     }
 

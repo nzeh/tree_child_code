@@ -67,7 +67,7 @@ pub mod traits {
         fn leaf_id(&'a self, node: Self::Node) -> Option<Self::Leaf>;
 
         /// Access the leaf's label
-        fn label(&'a self, node: Self::Node) -> Option<&'a T>;
+        fn label(&'a self, node: Self::Node) -> Option<&T>;
 
         /// Access the node identified by a given leaf ID
         fn leaf(&'a self, leaf: Self::Leaf) -> Self::Node;
@@ -75,7 +75,7 @@ pub mod traits {
 
     /// A tree builder trait used by the Newick parser and other parts of the code to construct a
     /// tree or forest.
-    pub trait TreeBuilder<'a, T> {
+    pub trait TreeBuilder<T> {
 
         /// The node type for the tree
         type Node: Clone + Copy;
@@ -87,16 +87,16 @@ pub mod traits {
         fn new() -> Self;
 
         /// Allocate a new tree
-        fn new_tree(&'a mut self);
+        fn new_tree(&mut self);
 
         /// Create a new leaf in the current tree
-        fn new_leaf(&'a mut self, label: T) -> Self::Node;
+        fn new_leaf(&mut self, label: T) -> Self::Node;
 
         /// Create a new internal node with the given set of children in the current tree.
-        fn new_node(&'a mut self, children: Vec<Self::Node>) -> Self::Node;
+        fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
 
         /// Finish the construction of this tree and make the given node its root.
-        fn finish_tree(&'a mut self, root: Self::Node);
+        fn finish_tree(&mut self, root: Self::Node);
 
         /// Retrieve the constructed trees
         fn trees(self) -> Vec<Self::Tree>;
@@ -227,11 +227,11 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         }
     }
 
-    fn node_count(&'a self) -> usize {
+    fn node_count(&self) -> usize {
         self.node_count
     }
 
-    fn root(&'a self) -> Option<Node> {
+    fn root(&self) -> Option<Node> {
         self.root
     }
 
@@ -258,40 +258,40 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         }
     }
 
-    fn parent(&'a self, node: Node) -> Option<Node> {
+    fn parent(&self, node: Node) -> Option<Node> {
         self.node(node).parent
     }
 
-    fn left(&'a self, node: Node) -> Option<Node> {
+    fn left(&self, node: Node) -> Option<Node> {
         self.node(node).left
     }
 
-    fn right(&'a self, node: Node) -> Option<Node> {
+    fn right(&self, node: Node) -> Option<Node> {
         self.node(node).right
     }
 
-    fn is_leaf(&'a self, node: Node) -> bool {
+    fn is_leaf(&self, node: Node) -> bool {
         match self.node(node).data {
             TypedNodeData::Leaf(_, _) => true,
             _                         => false,
         }
     }
 
-    fn leaf_id(&'a self, node: Node) -> Option<Leaf> {
+    fn leaf_id(&self, node: Node) -> Option<Leaf> {
         match self.node(node).data {
             TypedNodeData::Leaf(id, _) => Some(id),
             _                          => None,
         }
     }
 
-    fn label(&'a self, node: Node) -> Option<&'a T> {
+    fn label(&self, node: Node) -> Option<&T> {
         match self.node(node).data {
             TypedNodeData::Leaf(_, ref label) => Some(label),
             _                                 => None,
         }
     }
 
-    fn leaf(&'a self, leaf: Leaf) -> Node {
+    fn leaf(&self, leaf: Leaf) -> Node {
         self.leaves[leaf.id()]
     }
 }
@@ -361,7 +361,7 @@ pub struct TreeBuilder<T> {
 }
 
 
-impl<'a, T: 'a> traits::TreeBuilder<'a, T> for TreeBuilder<T> {
+impl<T> traits::TreeBuilder<T> for TreeBuilder<T> {
 
     type Node = Node;
 
@@ -373,11 +373,11 @@ impl<'a, T: 'a> traits::TreeBuilder<'a, T> for TreeBuilder<T> {
             trees:        vec![],
         }
     }
-    fn new_tree(&'a mut self) {
+    fn new_tree(&mut self) {
         self.current_tree = Some(Tree::new());
     }
 
-    fn new_leaf(&'a mut self, label: T) -> Node {
+    fn new_leaf(&mut self, label: T) -> Node {
         self.current_tree.as_mut().map(|t| {
             let leaf = Leaf(t.leaves.len());
             let node = Node(t.nodes.len());
@@ -393,7 +393,7 @@ impl<'a, T: 'a> traits::TreeBuilder<'a, T> for TreeBuilder<T> {
         }).unwrap()
     }
 
-    fn new_node(&'a mut self, children: Vec<Node>) -> Node {
+    fn new_node(&mut self, children: Vec<Node>) -> Node {
         self.current_tree.as_mut().map(|t| {
             let node = Node(t.nodes.len());
             t.nodes.push(NodeData {
@@ -416,7 +416,7 @@ impl<'a, T: 'a> traits::TreeBuilder<'a, T> for TreeBuilder<T> {
         }).unwrap()
     }
 
-    fn finish_tree(&'a mut self, root: Node) {
+    fn finish_tree(&mut self, root: Node) {
         self.current_tree.as_mut().map(|t| t.root = Some(root));
         self.trees.push(self.current_tree.take().unwrap());
     }
