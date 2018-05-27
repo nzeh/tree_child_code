@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::slice;
 
 
@@ -118,7 +120,7 @@ pub struct Tree<T> {
     root: Option<Node>,
 
     /// The set of leaves in the tree
-    leaves: Vec<Node>,
+    leaves: Vec<Option<Node>>,
 
     /// Number of nodes in this tree
     node_count: usize,
@@ -171,7 +173,7 @@ pub struct NodeIter {
 
 /// An iterator over the leaves of a tree
 pub struct LeafIter<'a> {
-    iter: slice::Iter<'a, Node>,
+    iter: slice::Iter<'a, Option<Node>>,
 }
 
 
@@ -292,7 +294,7 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
     }
 
     fn leaf(&self, leaf: Leaf) -> Node {
-        self.leaves[leaf.id()]
+        self.leaves[leaf.id()].unwrap()
     }
 }
 
@@ -332,7 +334,12 @@ impl<'a> Iterator for LeafIter<'a> {
     type Item = Node;
 
     fn next(&mut self) -> Option<Node> {
-        self.iter.next().map(|t| *t)
+        while let Some(leaf) = self.iter.next() {
+            if leaf.is_some() {
+                return *leaf;
+            }
+        }
+        None
     }
 }
 
@@ -358,10 +365,15 @@ pub struct TreeBuilder<T> {
 
     // The set of trees already constructed
     trees: Vec<Tree<T>>,
+
+    // Hash map to map labels to leaf IDs to ensure leaves with the same label in different trees
+    // get the same ID.
+    leaf_ids: HashMap<T, Leaf>,
 }
 
 
-impl<T> traits::TreeBuilder<T> for TreeBuilder<T> {
+impl<T> traits::TreeBuilder<T> for TreeBuilder<T>
+    where T: Clone + Eq + Hash {
 
     type Node = Node;
 
@@ -371,22 +383,30 @@ impl<T> traits::TreeBuilder<T> for TreeBuilder<T> {
         TreeBuilder {
             current_tree: None,
             trees:        vec![],
+            leaf_ids:     HashMap::new(),
         }
     }
+
     fn new_tree(&mut self) {
         self.current_tree = Some(Tree::new());
     }
 
     fn new_leaf(&mut self, label: T) -> Node {
+
+        let leaf_id = self.leaf_ids.len();
+        let leaf    = self.leaf_ids.entry(label.clone()).or_insert(Leaf::new(leaf_id));
+
         self.current_tree.as_mut().map(|t| {
-            let leaf = Leaf(t.leaves.len());
             let node = Node(t.nodes.len());
-            t.leaves.push(node);
+            while t.leaves.len() <= leaf.id() {
+                t.leaves.push(None);
+            }
+            t.leaves[leaf.id()] = Some(node);
             t.nodes.push(NodeData {
                 parent: None,
                 left:   None,
                 right:  None,
-                data:   TypedNodeData::Leaf(leaf, label),
+                data:   TypedNodeData::Leaf(*leaf, label),
             });
             t.node_count += 1;
             node
@@ -483,11 +503,11 @@ mod tests {
         let r = builder.new_node(vec![e, g, h]);
         builder.finish_tree(r);
         builder.new_tree();
-        let a = builder.new_leaf(13);
-        let b = builder.new_leaf(14);
-        let c = builder.new_leaf(2);
-        let d = builder.new_leaf(8);
-        let e = builder.new_leaf(9);
+        let a = builder.new_leaf(13); // 1
+        let b = builder.new_leaf(14); // 6
+        let c = builder.new_leaf(2);  // 2
+        let d = builder.new_leaf(8);  // 5
+        let e = builder.new_leaf(9);  // 7
         let f = builder.new_node(vec![d, e, a]);
         let g = builder.new_node(vec![b, f]);
         let r = builder.new_node(vec![g, c]);
@@ -531,22 +551,22 @@ mod tests {
         assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(4))), Some(Leaf::new(4)));
         assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(5))), Some(Leaf::new(5)));
         assert_eq!(trees[1].leaves().collect::<Vec<Node>>(),
-        vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(4)]);
-        assert_eq!(trees[1].leaf(Leaf::new(0)), Node::new(0));
-        assert_eq!(trees[1].leaf(Leaf::new(1)), Node::new(1));
+        vec![Node::new(0), Node::new(2), Node::new(3), Node::new(1), Node::new(4)]);
+        assert_eq!(trees[1].leaf(Leaf::new(1)), Node::new(0));
         assert_eq!(trees[1].leaf(Leaf::new(2)), Node::new(2));
-        assert_eq!(trees[1].leaf(Leaf::new(3)), Node::new(3));
-        assert_eq!(trees[1].leaf(Leaf::new(4)), Node::new(4));
-        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(0))), Some(&13));
-        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(1))), Some(&14));
+        assert_eq!(trees[1].leaf(Leaf::new(5)), Node::new(3));
+        assert_eq!(trees[1].leaf(Leaf::new(6)), Node::new(1));
+        assert_eq!(trees[1].leaf(Leaf::new(7)), Node::new(4));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(1))), Some(&13));
         assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(2))), Some(&2));
-        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(3))), Some(&8));
-        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(4))), Some(&9));
-        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(0))), Some(Leaf::new(0)));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(5))), Some(&8));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(6))), Some(&14));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(7))), Some(&9));
         assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(1))), Some(Leaf::new(1)));
         assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(2))), Some(Leaf::new(2)));
-        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(3))), Some(Leaf::new(3)));
-        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(4))), Some(Leaf::new(4)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(5))), Some(Leaf::new(5)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(6))), Some(Leaf::new(6)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(7))), Some(Leaf::new(7)));
     }
 
     /// Test that the nodes iterator collects all nodes
