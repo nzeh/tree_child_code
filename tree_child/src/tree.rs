@@ -373,7 +373,7 @@ pub struct TreeBuilder<T> {
 
 
 impl<T> traits::TreeBuilder<T> for TreeBuilder<T>
-    where T: Clone + Eq + Hash {
+where T: Clone + Eq + Hash {
 
     type Node = Node;
 

@@ -52,14 +52,14 @@ struct Pos(usize, usize);
 
 /// Parse a given one-line Newick string using the given tree builder
 pub fn parse_tree<B>(builder: &mut B, newick: &str) -> Result<()>
-    where B: TreeBuilder<String> {
+where B: TreeBuilder<String> {
     Parser::new(builder, newick).parse_tree()
 }
 
 
 /// Parse a given multi-line Newick string using the given tree builder
 pub fn parse_forest<B>(builder: &mut B, newick: &str) -> Result<()>
-    where B: TreeBuilder<String> {
+where B: TreeBuilder<String> {
     Parser::new(builder, newick).parse_forest()
 }
 
@@ -78,7 +78,7 @@ struct Parser<'b, 'i, B: 'b + TreeBuilder<String>> {
 }
 
 impl<'b, 'i, B> Parser<'b, 'i, B>
-    where B: 'b + TreeBuilder<String> {
+where B: 'b + TreeBuilder<String> {
 
     /// Create a new parser that parses the given Newick string and uses the given builder to
     /// construct the corresponding tree.
@@ -246,7 +246,7 @@ impl<'b, 'i, B> Parser<'b, 'i, B>
 
 /// Format a tree into a Newick string
 pub fn format_tree<T>(tree: &T) -> Option<String>
-    where for<'t> T: Tree<'t, String> {
+where for<'t> T: Tree<'t, String> {
     let mut newick = String::new();
     format_one_tree(tree, &mut newick)?;
     Some(newick)
@@ -255,7 +255,7 @@ pub fn format_tree<T>(tree: &T) -> Option<String>
 
 /// Format a forest into a Newick string, one line per tree
 pub fn format_forest<T>(forest: &[T]) -> Option<String>
-    where for<'t> T: Tree<'t, String> {
+where for<'t> T: Tree<'t, String> {
     let mut newick = String::new();
     for tree in forest {
         format_one_tree(tree, &mut newick)?;
@@ -267,10 +267,10 @@ pub fn format_forest<T>(forest: &[T]) -> Option<String>
 
 /// Format a tree into a Newick string, held in a given string buffer
 fn format_one_tree<T>(tree: &T, newick: &mut String) -> Option<()>
-    where for<'t> T: Tree<'t, String> {
+where for<'t> T: Tree<'t, String> {
 
     fn visit_node<'t, T>(tree: &'t T, newick: &mut String, node: T::Node) -> Option<()>
-        where T: 't + Tree<'t, String> {
+    where T: 't + Tree<'t, String> {
         if tree.is_leaf(node) {
             newick.write_str(&tree.label(node)?).unwrap();
         } else {

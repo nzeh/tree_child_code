@@ -32,12 +32,12 @@ pub enum LoC<T> {
 /// that is, the cluster containing the leaf representing another cluster C follows C in the
 /// cluster sequence.
 pub fn partition<Label, T, TNode, C, CNode, B>(trees: Vec<T>) -> Vec<Vec<C>>
-    where for<'t> T: Tree<'t, Label, Node=TNode>,
-          for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-          B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
-          Label:     Clone,
-          TNode:     Copy + Id + PartialEq,
-          CNode:     Copy + Default + Id + PartialEq {
+where for<'t> T: Tree<'t, Label, Node=TNode>,
+      for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
+      B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
+      Label:     Clone,
+      TNode:     Copy + Id + PartialEq,
+      CNode:     Copy + Default + Id + PartialEq {
 
     let (num_clusters, cluster_nodes) = {
 
@@ -65,15 +65,15 @@ pub fn partition<Label, T, TNode, C, CNode, B>(trees: Vec<T>) -> Vec<Vec<C>>
 /// Number the leaves in `tree` left to right and label every node with the interval of numbers of
 /// its descendant leaves.
 fn leaf_intervals<Label, T>(tree: &T) -> Vec<(usize, usize)>
-    where for<'t> T: Tree<'t, Label> {
+where for<'t> T: Tree<'t, Label> {
     LeafLabeller::new(tree).run()
 }
 
 
 /// The status of the leaf labelling process
 struct LeafLabeller<'t, Label, T>
-    where T:     't + Tree<'t, Label>,
-          Label: 't {
+where T:     't + Tree<'t, Label>,
+      Label: 't {
     tree:       &'t T,
     next_label: usize,
     intervals:  Vec<(usize, usize)>,
@@ -82,8 +82,8 @@ struct LeafLabeller<'t, Label, T>
 
 
 impl<'t, Label, T> LeafLabeller<'t, Label, T>
-    where T:     't + Tree<'t, Label>,
-          Label: 't {
+where T:     't + Tree<'t, Label>,
+      Label: 't {
     
     /// Create a new `LeafLabeller` for the given tree
     fn new(tree: &'t T) -> Self {
@@ -130,17 +130,17 @@ impl<'t, Label, T> LeafLabeller<'t, Label, T>
 fn map_to_lca<'t, Label, T, TNode>(
     t1: &'t (&'t T, Vec<(usize, usize)>),
     t2: &'t (&'t T, Vec<(usize, usize)>)) -> Vec<TNode>
-    where T:     't + Tree<'t, Label, Node=TNode>,
-          Label: 't,
-          TNode: Copy + Id + PartialEq {
+where T:     't + Tree<'t, Label, Node=TNode>,
+      Label: 't,
+      TNode: Copy + Id + PartialEq {
     LcaMapper::new(t1, t2).run()
 }
 
 
 /// The status of the LCA mapping process
 struct LcaMapper<'t, Label, T>
-    where Label: 't,
-          T:     't + Tree<'t, Label> {
+where Label: 't,
+      T:     't + Tree<'t, Label> {
 
     /// The tree to be mapped
     tree: &'t T,
@@ -158,8 +158,8 @@ struct LcaMapper<'t, Label, T>
 
 
 impl<'t, Label, T> LcaMapper<'t, Label, T>
-    where Label: 't,
-          T:     't + Tree<'t, Label> {
+where Label: 't,
+      T:     't + Tree<'t, Label> {
 
     /// Create a new `LcaMapper` for a pair of trees whose nodes have been numbered with leaf
     /// intervals.
@@ -235,9 +235,9 @@ fn identify_clusters<'t, Label, T, TNode>(
     tree:          &'t T,
     forward_maps:  Vec<Vec<TNode>>,
     backward_maps: Vec<Vec<TNode>>) -> (usize, Vec<Vec<Option<usize>>>)
-    where T:      't + Tree<'t, Label, Node=TNode>,
-          Label:  't,
-          TNode:  Copy + Id + PartialEq {
+where T:      't + Tree<'t, Label, Node=TNode>,
+      Label:  't,
+      TNode:  Copy + Id + PartialEq {
 
     let mut cluster_nodes = vec![];
     cluster_nodes.push(vec![None; forward_maps[0].len()]);
@@ -270,12 +270,12 @@ fn decompose_trees<Label, T, TNode, C, CNode, B>(
     trees:         Vec<T>,
     num_clusters:  usize,
     cluster_nodes: Vec<Vec<Option<usize>>>) -> Vec<Vec<C>>
-    where for<'t> T: Tree<'t, Label, Node=TNode>,
-          for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-          B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
-          Label:     Clone,
-          CNode:     Copy + Default + Id + PartialEq,
-          TNode:     Copy + Id + PartialEq {
+where for<'t> T: Tree<'t, Label, Node=TNode>,
+      for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
+      B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
+      Label:     Clone,
+      CNode:     Copy + Default + Id + PartialEq,
+      TNode:     Copy + Id + PartialEq {
 
     let mut decomp = Decomposer::<Label, B, C, CNode>::new(num_clusters);
     for (t, cs) in trees.into_iter().zip(cluster_nodes) {
@@ -287,8 +287,8 @@ fn decompose_trees<Label, T, TNode, C, CNode, B>(
 
 /// The state of the cluster decomposition process
 struct Decomposer<Label, B, C, CNode>
-    where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-          B:         TreeBuilder<LoC<Label>, Tree=C> {
+where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
+      B:         TreeBuilder<LoC<Label>, Tree=C> {
 
     /// Tree builders used to build the trees in the different clusters
     builders: Vec<B>,
@@ -298,9 +298,9 @@ struct Decomposer<Label, B, C, CNode>
 
 
 impl<Label, B, C, CNode> Decomposer<Label, B, C, CNode>
-    where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-          CNode:     Copy + Default + Id + PartialEq,
-          B:         TreeBuilder<LoC<Label>, Tree=C, Node=CNode> {
+where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
+      CNode:     Copy + Default + Id + PartialEq,
+      B:         TreeBuilder<LoC<Label>, Tree=C, Node=CNode> {
 
     /// Construct a new decomposer capable of building num_clusters + 1 clusters
     fn new(num_clusters: usize) -> Self {
@@ -313,9 +313,9 @@ impl<Label, B, C, CNode> Decomposer<Label, B, C, CNode>
 
     /// Decompose tree into its clusters
     fn run<T, TNode>(&mut self, tree: T, cluster_nodes: Vec<Option<usize>>)
-        where for<'t> T: Tree<'t, Label, Node=TNode>,
-              Label:     Clone,
-              TNode:     Copy + Id + PartialEq {
+    where for<'t> T: Tree<'t, Label, Node=TNode>,
+          Label:     Clone,
+          TNode:     Copy + Id + PartialEq {
         self.traverse(&tree, &cluster_nodes, tree.root().unwrap(), None);
     }
 
@@ -326,9 +326,9 @@ impl<Label, B, C, CNode> Decomposer<Label, B, C, CNode>
         cluster_nodes: &Vec<Option<usize>>,
         node:          TNode,
         cluster:       Option<usize>) -> CNode
-        where for<'t> T: Tree<'t, Label, Node=TNode>,
-              Label:     Clone,
-              TNode:     Copy + Id + PartialEq {
+    where for<'t> T: Tree<'t, Label, Node=TNode>,
+          Label:     Clone,
+          TNode:     Copy + Id + PartialEq {
 
         if tree.is_leaf(node) {
 
