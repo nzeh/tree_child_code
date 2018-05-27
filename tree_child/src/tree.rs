@@ -154,12 +154,12 @@ enum TypedNodeData<T> {
 
 
 /// The type used to represent tree nodes
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Node(usize);
 
 
 /// The type used to refer to leaves
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Leaf(usize);
 
 
@@ -423,5 +423,227 @@ impl<T> traits::TreeBuilder<T> for TreeBuilder<T> {
 
     fn trees(self) -> Vec<Self::Tree> {
         self.trees
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use super::traits::TreeBuilder as TreeBuilderTrait;
+
+    /// Test that leaf IDs convert correctly
+    #[test]
+    fn leaf_id() {
+        let a = Leaf::new(3);
+        let b = Leaf::new(8);
+        assert_eq!(a.id(), 3);
+        assert_eq!(b.id(), 8);
+    }
+
+    /// Test that node IDs convert correctly
+    #[test]
+    fn node_id() {
+        let a = Node::new(13);
+        let b = Node::new(0);
+        assert_eq!(a.id(), 13);
+        assert_eq!(b.id(), 0);
+    }
+
+    /// Test that an initial tree stores nothing
+    #[test]
+    fn tree_new() {
+        let tree: Tree<u32> = Tree::new();
+        assert_eq!(tree.root(), None);
+        assert_eq!(tree.node_count(), 0);
+        assert_eq!(tree.nodes().next(), None);
+        assert_eq!(tree.leaves().next(), None);
+    }
+
+    /// Test that an initial tree builder generates no trees
+    #[test]
+    fn tree_builder_new() {
+        let builder: TreeBuilder<u32> = TreeBuilder::new();
+        assert!(builder.current_tree.is_none());
+        assert_eq!(builder.trees().len(), 0);
+    }
+
+    /// Build a tree to be used in the remaining tests
+    fn build_tree() -> Vec<Tree<u32>> {
+        let mut builder: TreeBuilder<u32> = TreeBuilder::new();
+        builder.new_tree();
+        let a = builder.new_leaf(5);
+        let b = builder.new_leaf(13);
+        let c = builder.new_leaf(2);
+        let d = builder.new_leaf(1);
+        let e = builder.new_node(vec![a, c, d]);
+        let f = builder.new_leaf(3);
+        let g = builder.new_node(vec![f, b]);
+        let h = builder.new_leaf(8);
+        let r = builder.new_node(vec![e, g, h]);
+        builder.finish_tree(r);
+        builder.new_tree();
+        let a = builder.new_leaf(13);
+        let b = builder.new_leaf(14);
+        let c = builder.new_leaf(2);
+        let d = builder.new_leaf(8);
+        let e = builder.new_leaf(9);
+        let f = builder.new_node(vec![d, e, a]);
+        let g = builder.new_node(vec![b, f]);
+        let r = builder.new_node(vec![g, c]);
+        builder.finish_tree(r);
+        builder.trees()
+    }
+
+    /// Test the basic stats of the trees built using built_tree
+    #[test]
+    fn build_tree_basic_stats() {
+        let trees = build_tree();
+        assert_eq!(trees.len(), 2);
+        assert_eq!(trees[0].node_count(), 9);
+        assert_eq!(trees[1].node_count(), 8);
+        assert_eq!(trees[0].root(), Some(Node::new(8)));
+        assert_eq!(trees[1].root(), Some(Node::new(7)));
+    }
+
+    /// Test that the leaves are set up right
+    #[test]
+    fn build_tree_leaves() {
+        let trees = build_tree();
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(5), Node::new(7)]);
+        assert_eq!(trees[0].leaf(Leaf::new(0)), Node::new(0));
+        assert_eq!(trees[0].leaf(Leaf::new(1)), Node::new(1));
+        assert_eq!(trees[0].leaf(Leaf::new(2)), Node::new(2));
+        assert_eq!(trees[0].leaf(Leaf::new(3)), Node::new(3));
+        assert_eq!(trees[0].leaf(Leaf::new(4)), Node::new(5));
+        assert_eq!(trees[0].leaf(Leaf::new(5)), Node::new(7));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(0))), Some(&5));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(1))), Some(&13));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(2))), Some(&2));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(3))), Some(&1));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(4))), Some(&3));
+        assert_eq!(trees[0].label(trees[0].leaf(Leaf::new(5))), Some(&8));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(0))), Some(Leaf::new(0)));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(1))), Some(Leaf::new(1)));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(2))), Some(Leaf::new(2)));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(3))), Some(Leaf::new(3)));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(4))), Some(Leaf::new(4)));
+        assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(5))), Some(Leaf::new(5)));
+        assert_eq!(trees[1].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(4)]);
+        assert_eq!(trees[1].leaf(Leaf::new(0)), Node::new(0));
+        assert_eq!(trees[1].leaf(Leaf::new(1)), Node::new(1));
+        assert_eq!(trees[1].leaf(Leaf::new(2)), Node::new(2));
+        assert_eq!(trees[1].leaf(Leaf::new(3)), Node::new(3));
+        assert_eq!(trees[1].leaf(Leaf::new(4)), Node::new(4));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(0))), Some(&13));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(1))), Some(&14));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(2))), Some(&2));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(3))), Some(&8));
+        assert_eq!(trees[1].label(trees[1].leaf(Leaf::new(4))), Some(&9));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(0))), Some(Leaf::new(0)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(1))), Some(Leaf::new(1)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(2))), Some(Leaf::new(2)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(3))), Some(Leaf::new(3)));
+        assert_eq!(trees[1].leaf_id(trees[1].leaf(Leaf::new(4))), Some(Leaf::new(4)));
+    }
+
+    /// Test that the nodes iterator collects all nodes
+    #[test]
+    fn build_tree_nodes() {
+        let trees = build_tree();
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(4), 
+        Node::new(5), Node::new(6), Node::new(7), Node::new(8)]);
+        assert_eq!(trees[1].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(4), 
+        Node::new(5), Node::new(6), Node::new(7)]);
+    }
+
+    /// Test that is_leaf reports the right nodes as leaves
+    #[test]
+    fn build_tree_is_leaf() {
+        let trees        = build_tree();
+        let mut nodes0   = trees[0].nodes();
+        let mut answers0 = vec![true, true, true, true, false, true, false, true, false].into_iter();
+        let mut nodes1   = trees[1].nodes();
+        let mut answers1 = vec![true, true, true, true, true, false, false, false].into_iter();
+        for _ in 0..9 {
+            assert_eq!(trees[0].is_leaf(nodes0.next().unwrap()), answers0.next().unwrap());
+        }
+        for _ in 0..8 {
+            assert_eq!(trees[1].is_leaf(nodes1.next().unwrap()), answers1.next().unwrap());
+        }
+    }
+
+    /// Test that the children of each internal node are reported correctly
+    #[test]
+    fn build_tree_children() {
+        let trees = build_tree();
+        assert_eq!(trees[0].children(Node::new(4)).collect::<Vec<Node>>(),
+        vec![Node::new(0), Node::new(2), Node::new(3)]);
+        assert_eq!(trees[0].children(Node::new(6)).collect::<Vec<Node>>(),
+        vec![Node::new(5), Node::new(1)]);
+        assert_eq!(trees[0].children(Node::new(8)).collect::<Vec<Node>>(),
+        vec![Node::new(4), Node::new(6), Node::new(7)]);
+        assert_eq!(trees[1].children(Node::new(5)).collect::<Vec<Node>>(),
+        vec![Node::new(3), Node::new(4), Node::new(0)]);
+        assert_eq!(trees[1].children(Node::new(6)).collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(5)]);
+        assert_eq!(trees[1].children(Node::new(7)).collect::<Vec<Node>>(),
+        vec![Node::new(6), Node::new(2)]);
+    }
+
+    /// Test that parents are reported correctly
+    #[test]
+    fn build_tree_parents() {
+        let trees        = build_tree();
+        let mut nodes0   = trees[0].nodes();
+        let mut answers0 = [
+            Some(4), Some(6), Some(4), Some(4), Some(8), Some(6), Some(8), Some(8), None]
+                .into_iter();
+        let mut nodes1   = trees[1].nodes();
+        let mut answers1 = [
+            Some(5), Some(6), Some(7), Some(5), Some(5), Some(6), Some(7), None]
+                .into_iter();
+        for _ in 0..9 {
+            assert_eq!(trees[0].parent(nodes0.next().unwrap()),
+            answers0.next().unwrap().map(|id| Node::new(id)));
+        }
+        for _ in 0..8 {
+            assert_eq!(trees[1].parent(nodes1.next().unwrap()),
+            answers1.next().unwrap().map(|id| Node::new(id)));
+        }
+    }
+
+    /// Test that left and right siblings are reported correctly
+    #[test]
+    fn build_tree_siblings() {
+        let trees       = build_tree();
+        let mut nodes0  = trees[0].nodes();
+        let mut lefts0  = [
+            None, Some(5), Some(0), Some(2), None, None, Some(4), Some(6), None].into_iter();
+        let mut rights0 = [
+            Some(2), None, Some(3), None, Some(6), Some(1), Some(7), None, None].into_iter();
+        let mut nodes1  = trees[1].nodes();
+        let mut lefts1  = [
+            Some(4), None, Some(6), None, Some(3), Some(1), None, None].into_iter();
+        let mut rights1 = [
+            None, Some(5), None, Some(4), Some(0), None, Some(2), None].into_iter();
+        for _ in 0..9 {
+            let node  = nodes0.next().unwrap();
+            let left  = lefts0.next().unwrap().map(|id| Node::new(id));
+            let right = rights0.next().unwrap().map(|id| Node::new(id));
+            assert_eq!(trees[0].left(node), left);
+            assert_eq!(trees[0].right(node), right);
+        }
+        for _ in 0..8 {
+            let node  = nodes1.next().unwrap();
+            let left  = lefts1.next().unwrap().map(|id| Node::new(id));
+            let right = rights1.next().unwrap().map(|id| Node::new(id));
+            assert_eq!(trees[1].left(node), left);
+            assert_eq!(trees[1].right(node), right);
+        }
     }
 }
