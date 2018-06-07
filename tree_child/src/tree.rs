@@ -21,10 +21,10 @@ pub mod traits {
     pub trait Tree<'a, T: 'a> {
 
         /// The node type for the tree
-        type Node: Clone + Copy + Id + PartialEq;
+        type Node: Clone + Copy + Id + PartialEq + Ord;
 
         /// The type used to identify leaves
-        type Leaf: Clone + Copy + Id + PartialEq;
+        type Leaf: Clone + Copy + Id + PartialEq + Ord;
 
         /// An iterator over the nodes of the tree
         type NodeIter: Iterator<Item=Self::Node>;
@@ -39,13 +39,16 @@ pub mod traits {
         fn new() -> Self;
 
         /// Access the number of nodes in the tree
-        fn node_count(&'a self) -> usize;
+        fn node_count(&self) -> usize;
+
+        /// Access the number of leaves in the tree
+        fn leaf_count(&self) -> usize;
 
         /// Access the root of the next tree
-        fn root(&'a self) -> Option<Self::Node>;
+        fn root(&self) -> Option<Self::Node>;
 
         /// Access the nodes of the tree
-        fn nodes(&'a self) -> Self::NodeIter;
+        fn nodes(&self) -> Self::NodeIter;
 
         /// Access the leaves of the tree
         fn leaves(&'a self) -> Self::LeafIter;
@@ -73,6 +76,12 @@ pub mod traits {
 
         /// Access the node identified by a given leaf ID
         fn leaf(&'a self, leaf: Self::Leaf) -> Self::Node;
+
+        /// Prune a leaf from the tree without removing it from the list of leaves
+        fn prune_leaf(&'a mut self, leaf: Self::Leaf);
+
+        /// Restore a pruned leaf by reattaching it to its parent
+        fn restore_leaf(&'a mut self, leaf: Self::Leaf);
     }
 
     /// A tree builder trait used by the Newick parser and other parts of the code to construct a
@@ -114,16 +123,30 @@ use tree::traits::Tree as TreeTrait;
 pub struct Tree<T> {
 
     /// The set of nodes in the tree
-    nodes: Vec<NodeData<T>>,
+    nodes: Vec<Removable<NodeData<T>>>,
 
     /// The root of the tree
     root: Option<Node>,
 
     /// The set of leaves in the tree
-    leaves: Vec<Option<Node>>,
+    leaves: Vec<Option<Removable<Node>>>,
 
     /// Number of nodes in this tree
     node_count: usize,
+
+    /// Number of leaves in this tree
+    leaf_count: usize,
+}
+
+
+/// A marker type that holds on to an element and marks it as alive or dead
+struct Removable<T> {
+    
+    /// The stored item
+    item: T,
+
+    /// Is the item currently present?
+    is_present: bool,
 }
 
 
@@ -156,24 +179,25 @@ enum TypedNodeData<T> {
 
 
 /// The type used to represent tree nodes
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Node(usize);
 
 
 /// The type used to refer to leaves
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Leaf(usize);
 
 
 /// An iterator over the nodes of a tree
-pub struct NodeIter {
+pub struct NodeIter<'a, T: 'a> {
+    tree: &'a Tree<T>,
     node: usize,
     end:  usize,
 }
 
 /// An iterator over the leaves of a tree
 pub struct LeafIter<'a> {
-    iter: slice::Iter<'a, Option<Node>>,
+    iter: slice::Iter<'a, Option<Removable<Node>>>,
 }
 
 
@@ -181,6 +205,47 @@ pub struct LeafIter<'a> {
 pub struct ChildIter<'a, T: 'a> {
     tree:  &'a Tree<T>,
     child: Option<Node>,
+}
+
+
+impl<T> Removable<T> {
+
+    /// Create a new removable item
+    fn new(item: T) -> Removable<T> {
+        Removable {
+            item,
+            is_present: true,
+        }
+    }
+
+    /// Mark the item as removed
+    fn remove(&mut self) {
+        assert!(self.is_present, "double-removal of Removable");
+        self.is_present = false;
+    }
+
+    /// Mark the item as present
+    fn restore(&mut self) {
+        assert!(!self.is_present, "double-restoration of Removable");
+        self.is_present = true;
+    }
+
+    /// Provide a reference to the stored item
+    fn item(&self) -> &T {
+        assert!(self.is_present, "access to removed Removable");
+        &self.item
+    }
+
+    /// Provide a mutable reference to a stored item
+    fn item_mut(&mut self) -> &mut T {
+        assert!(self.is_present, "access to removed Removable");
+        &mut self.item
+    }
+
+    /// Is this removable present?
+    fn is_present(&self) -> bool {
+        self.is_present
+    }
 }
 
 
@@ -214,7 +279,7 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
 
     type Leaf = Leaf;
 
-    type NodeIter = NodeIter;
+    type NodeIter = NodeIter<'a, T>;
 
     type LeafIter = LeafIter<'a>;
 
@@ -226,6 +291,7 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
             root:       None,
             leaves:     vec![],
             node_count: 0,
+            leaf_count: 0,
         }
     }
 
@@ -233,17 +299,24 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         self.node_count
     }
 
+    fn leaf_count(&self) -> usize {
+        self.leaf_count
+    }
+
     fn root(&self) -> Option<Node> {
         self.root
     }
 
-    fn nodes(&'a self) -> NodeIter {
+    // TODO: Iterate only over the nodes that are alive
+    fn nodes(&self) -> NodeIter<'a, T> {
         NodeIter {
+            tree: self,
             node: 0,
             end:  self.nodes.len(),
         }
     }
 
+    // TODO: Iterate only over the leaves that are alive
     fn leaves(&'a self) -> LeafIter<'a> {
         LeafIter {
             iter: self.leaves.iter(),
@@ -294,7 +367,52 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
     }
 
     fn leaf(&self, leaf: Leaf) -> Node {
-        self.leaves[leaf.id()].unwrap()
+        *self.leaves[leaf.id()].as_ref().unwrap().item()
+    }
+
+    fn prune_leaf(&mut self, leaf: Leaf) {
+        let node = self.leaf(leaf);
+        self.leaves[leaf.id()].as_mut().unwrap().remove();
+        self.leaf_count -= 1;
+        match self.parent(node) {
+            Some(parent) => {
+                let left  = self.left(node);
+                let right = self.right(node);
+                match left {
+                    Some(left) => {
+                        self.nodes[left.id()].item_mut().right = right;
+                    },
+                    None => {
+                        self.nodes[parent.id()].item_mut().data =
+                            TypedNodeData::Internal(right.unwrap());
+                    },
+                }
+                if let Some(right) = right {
+                    self.nodes[right.id()].item_mut().left = left;
+                }
+            },
+            None => {
+                self.root = None;
+            },
+        }
+    }
+
+    fn restore_leaf(&mut self, leaf: Leaf) {
+        self.leaves[leaf.id()].as_mut().unwrap().restore();
+        self.leaf_count += 1;
+        let node = self.leaf(leaf);
+        match self.parent(node) {
+            Some(parent) => {
+                if let TypedNodeData::Internal(right) = self.nodes[parent.id()].item().data {
+                    self.nodes[right.id()].item_mut().left = Some(node);
+                    self.nodes[node.id()].item_mut().right = Some(right);
+                    self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
+                }
+            },
+            None => {
+                self.root = Some(node);
+            },
+        }
     }
 }
 
@@ -303,28 +421,30 @@ impl<T> Tree<T> {
 
     /// Access the node data for the given node
     fn node(&self, node: Node) -> &NodeData<T> {
-        &self.nodes[node.id()]
+        self.nodes[node.id()].item()
     }
 
     /// Access the node data mutably
     fn node_mut(&mut self, node: Node) -> &mut NodeData<T> {
-        &mut self.nodes[node.id()]
+        self.nodes[node.id()].item_mut()
     }
 
 }
 
 
-impl Iterator for NodeIter {
+impl<'a, T> Iterator for NodeIter<'a, T> {
 
     type Item = Node;
 
     fn next(&mut self) -> Option<Node> {
-        if self.node < self.end {
+        while self.node < self.end {
+            if self.tree.nodes[self.node].is_present() {
+                self.node += 1;
+                return Some(Node::new(self.node - 1));
+            }
             self.node += 1;
-            Some(Node::new(self.node - 1))
-        } else {
-            None
         }
+        None
     }
 }
 
@@ -335,8 +455,10 @@ impl<'a> Iterator for LeafIter<'a> {
 
     fn next(&mut self) -> Option<Node> {
         while let Some(leaf) = self.iter.next() {
-            if leaf.is_some() {
-                return *leaf;
+            if let Some(leaf) = leaf {
+                if leaf.is_present() {
+                    return Some(*leaf.item());
+                }
             }
         }
         None
@@ -401,14 +523,15 @@ where T: Clone + Eq + Hash {
             while t.leaves.len() <= leaf.id() {
                 t.leaves.push(None);
             }
-            t.leaves[leaf.id()] = Some(node);
-            t.nodes.push(NodeData {
+            t.leaves[leaf.id()] = Some(Removable::new(node));
+            t.nodes.push(Removable::new(NodeData {
                 parent: None,
                 left:   None,
                 right:  None,
                 data:   TypedNodeData::Leaf(*leaf, label),
-            });
+            }));
             t.node_count += 1;
+            t.leaf_count += 1;
             node
         }).unwrap()
     }
@@ -416,12 +539,12 @@ where T: Clone + Eq + Hash {
     fn new_node(&mut self, children: Vec<Node>) -> Node {
         self.current_tree.as_mut().map(|t| {
             let node = Node(t.nodes.len());
-            t.nodes.push(NodeData {
+            t.nodes.push(Removable::new(NodeData {
                 parent: None,
                 left:   None,
                 right:  None,
                 data:   TypedNodeData::Internal(children[0]),
-            });
+            }));
             let mut last = None;
             for child in children.into_iter() {
                 t.node_mut(child).left   = last;

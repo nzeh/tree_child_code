@@ -36,8 +36,8 @@ where for<'t> T: Tree<'t, Label, Node=TNode>,
       for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
       B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
       Label:     Clone,
-      TNode:     Copy + Id + PartialEq,
-      CNode:     Copy + Default + Id + PartialEq {
+      TNode:     Copy + Id + PartialEq + Ord,
+      CNode:     Copy + Default + Id + PartialEq + Ord {
 
     let (num_clusters, cluster_nodes) = {
 
@@ -132,7 +132,7 @@ fn map_to_lca<'t, Label, T, TNode>(
     t2: &'t (&'t T, Vec<(usize, usize)>)) -> Vec<TNode>
 where T:     't + Tree<'t, Label, Node=TNode>,
       Label: 't,
-      TNode: Copy + Id + PartialEq {
+      TNode: Copy + Id + PartialEq + Ord {
     LcaMapper::new(t1, t2).run()
 }
 
@@ -237,7 +237,7 @@ fn identify_clusters<'t, Label, T, TNode>(
     backward_maps: Vec<Vec<TNode>>) -> (usize, Vec<Vec<Option<usize>>>)
 where T:      't + Tree<'t, Label, Node=TNode>,
       Label:  't,
-      TNode:  Copy + Id + PartialEq {
+      TNode:  Copy + Id + PartialEq + Ord {
 
     let mut cluster_nodes = vec![];
     cluster_nodes.push(vec![None; forward_maps[0].len()]);
@@ -275,7 +275,7 @@ where for<'t> T: Tree<'t, Label, Node=TNode>,
       B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
       Label:     Clone,
       CNode:     Copy + Default + Id + PartialEq,
-      TNode:     Copy + Id + PartialEq {
+      TNode:     Copy + Id + PartialEq + Ord {
 
     let mut decomp = Decomposer::<Label, B, C, CNode>::new(num_clusters);
     for (t, cs) in trees.into_iter().zip(cluster_nodes) {
@@ -315,7 +315,7 @@ where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
     fn run<T, TNode>(&mut self, tree: T, cluster_nodes: Vec<Option<usize>>)
     where for<'t> T: Tree<'t, Label, Node=TNode>,
           Label:     Clone,
-          TNode:     Copy + Id + PartialEq {
+          TNode:     Copy + Id + PartialEq + Ord {
         self.traverse(&tree, &cluster_nodes, tree.root().unwrap(), None);
     }
 
@@ -328,7 +328,7 @@ where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
         cluster:       Option<usize>) -> CNode
     where for<'t> T: Tree<'t, Label, Node=TNode>,
           Label:     Clone,
-          TNode:     Copy + Id + PartialEq {
+          TNode:     Copy + Id + PartialEq + Ord {
 
         if tree.is_leaf(node) {
 
