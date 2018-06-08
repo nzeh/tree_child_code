@@ -1,4 +1,5 @@
 use tree::{Leaf, Node, Tree};
+use std::cmp::min;
 
 /// An entry in a tree-child sequence
 pub enum Pair {
@@ -123,28 +124,32 @@ impl<T> Search<T> {
     /// Create a new search state
     fn new(trees: Vec<Tree<T>>) -> Self {
 
-        let cherries = Self::find_cherries(&trees);
-        let (leaf_data, trivial_cherries, non_trivial_cherries) =
-            Self::classify_cherries(trees.len(), trees[0].leaf_count(), cherries);
+        let leaf_data = vec![LeafData {
+            num_occurrences: trees.len(),
+            cherries:        vec![],
+        }; trees[0].leaf_count()];
 
-        Search {
+        let mut search = Search {
             trees,
             leaf_data,
-            trivial_cherries,
-            non_trivial_cherries,
-            max_weight: 0,
-            weight: 0,
-            tc_seq: vec![],
-            history: vec![],
-        }
+            trivial_cherries:     vec![],
+            non_trivial_cherries: vec![],
+            max_weight:           0,
+            weight:               0,
+            tc_seq:               vec![],
+            history:              vec![],
+        };
+
+        search.find_cherries();
+        search
     }
 
     /// Find all cherries in a set of trees
-    fn find_cherries(trees: &[Tree<T>]) -> Vec<(Leaf, Leaf, usize)> {
+    fn find_cherries(&mut self) {
 
         let mut cherries = vec![];
 
-        for (i, tree) in trees.iter().enumerate() {
+        for (i, tree) in self.trees.iter().enumerate() {
             for x in tree.leaves() {
                 if let Some(p) = tree.parent(x) {
                     for y in tree.children(p) {
@@ -158,96 +163,43 @@ impl<T> Search<T> {
             }
         }
 
-        cherries
-    }
-
-    /// Construct the leaf data for all leaves in a set of trees
-    fn classify_cherries(
-        num_trees:    usize,
-        num_leaves:   usize,
-        mut cherries: Vec<(Leaf, Leaf, usize)>) ->
-        (Vec<LeafData>, Vec<CherryData>, Vec<CherryData>) {
-
-        // Initially, every leaf occurs in all trees and participates in no cherries
-        let mut leaf_data = vec![LeafData {
-            num_occurrences: num_trees,
-            cherries:        vec![],
-        }; num_leaves];
-
-        // We haven't discovered any trivial or non-trivial cherries yet.
-        let mut trivial_cherries     = vec![];
-        let mut non_trivial_cherries = vec![];
-
-        // The members of the current cherry and the trees that have this cherry
-        let mut cherry = None;
-        let mut trees  = vec![];
-
-        cherries.sort_unstable();
-        for (x, y, t) in cherries {
-
-            // If the previous cherry did not involve x and y, then record information about the
-            // previous cherry and initialize (u, v) to be the next cherry.
-            if cherry != Some((x, y)) {
-                // Record the previous cherry only if it wasn't None.
-                if let Some((u, v)) = cherry {
-                    Self::record_cherry(num_trees,
-                                        &mut leaf_data, &mut trivial_cherries, &mut non_trivial_cherries,
-                                        u, v, trees);
-                }
-                cherry = Some((x, y));
-                trees = vec![];
-            }
-
-            // Add t to the list of trees containing the current cherry (u, v)
-            trees.push(t);
+        for (x, y, tree) in cherries {
+            self.record_cherry(x, y, tree);
         }
-
-        // Record the final cherry.
-        if let Some((u, v)) = cherry {
-            Self::record_cherry(num_trees,
-                                &mut leaf_data, &mut trivial_cherries, &mut non_trivial_cherries,
-                                u, v, trees);
-        }
-
-        (leaf_data, trivial_cherries, non_trivial_cherries)
     }
 
     /// Record information about the given cherry (u, v) occurring in trees.
-    fn record_cherry(
-        num_trees:            usize,
-        leaf_data:            &mut Vec<LeafData>,
-        trivial_cherries:     &mut Vec<CherryData>,
-        non_trivial_cherries: &mut Vec<CherryData>,
-        u:                    Leaf,
-        v:                    Leaf,
-        trees:                Vec<usize>) {
+    fn record_cherry(&mut self, u: Leaf, v: Leaf, tree: usize) {
 
-        // The number of trees containing this cherry
-        let num_occurrences = trees.len();
+        // See whether we already have a cherry (u, v) on record
+        let u_cherries = &self.leaf_data[u.id()].cherries;
+        let cherry_ref = u_cherries.iter().find(|cherry_ref| {
+            let cherry = self.cherry(**cherry_ref);
+            (cherry.leaves.0).0 == v || (cherry.leaves.1).0 == v
+        }).map(|cherry_ref| *cherry_ref);
 
-        // Create the representation of this cherry
-        let cherry_data = CherryData {
-            leaves: (
-                        LeafRef(u, leaf_data[u.id()].cherries.len()),
-                        LeafRef(v, leaf_data[v.id()].cherries.len()),
-                        ),
-                        trees,
-        };
-
-        // Store this cherry in the list of trivial or non-trivial cherries and get a reference
-        // to this entry in the cherry list
-        let cherry_ref = if num_occurrences == num_trees {
-            trivial_cherries.push(cherry_data);
-            CherryRef::Trivial(trivial_cherries.len() - 1)
+        // Add the current tree to the list of trees for this cherry or create a new cherry
+        let cherry_ref = if let Some(cherry_ref) = cherry_ref {
+            self.cherry_mut(cherry_ref).trees.push(tree);
+            cherry_ref
         } else {
-            non_trivial_cherries.push(cherry_data);
-            CherryRef::NonTrivial(non_trivial_cherries.len() - 1)
+            let cherry_data = CherryData {
+                leaves: (LeafRef(u, 0), LeafRef(v, 0)),
+                trees:  vec![tree],
+            }
+            self.add_non_trivial_cherry(cherry_data);
         };
 
-        // Push a reference to the created cherry into the lists of cherries that u and v
-        // participate in.
-        leaf_data[u.id()].cherries.push(cherry_ref);
-        leaf_data[v.id()].cherries.push(cherry_ref);
+        // Mark the cherry as trivial if adding the new occurrence made it trivial
+        let cherry_occurrences = self.cherry(cherry_ref).trees.len();
+        let leaf_occurrences = min(
+            self.leaf_data[u.id()].num_occurrences,
+            self.leaf_data[v.id()].num_occurrences);
+
+        if leaf_occurrences == cherry_occurrences {
+            let cherry_data = self.remove_cherry(cherry_ref);
+            self.add_trivial_cherry(cherry_data);
+        }
     }
 
     /// Search for a tree-child sequence of weight k.
@@ -440,6 +392,19 @@ impl<T> Search<T> {
     fn undo_record_tree_child_pair(&mut self) {
         self.tc_seq.pop();
     }
+
+    /// Add a trivial cherry
+    fn add_trivial_cherry(&mut self, cherry_data: CherryData) -> CherryRef {
+    }
+
+    /// Add a non-trivial cherry
+    fn add_non_trivial_cherry(&mut self, cherry_data: CherryData) -> CherryRef {
+    }
+
+    /// Remove a cherry
+    fn remove_cherry(&mut self, cherry_ref: CherryRef) -> CherryData {
+    }
+
 
     /// Get a reference to a cherry
     fn cherry(&self, cherry_ref: CherryRef) -> &CherryData {

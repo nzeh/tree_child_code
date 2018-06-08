@@ -48,12 +48,6 @@ struct NodeData<T> {
     /// Parent
     parent: Option<Node>,
 
-    /// Left sibling
-    left: Option<Node>,
-
-    /// Right sibling
-    right: Option<Node>,
-
     /// The leaf- or internal-node-specific data
     data: TypedNodeData<T>,
 }
@@ -65,8 +59,8 @@ enum TypedNodeData<T> {
     /// An leaf has an ID of type `Leaf` and a label of type `T`.
     Leaf(Leaf, T),
 
-    /// An internal node has a child.
-    Internal(Node),
+    /// An internal node has a list of children.
+    Internal(Vec<Node>),
 }
 
 
@@ -94,9 +88,8 @@ pub struct LeafIter<'a> {
 
 
 /// An iterator over the children of a node
-pub struct ChildIter<'a, T: 'a> {
-    tree:  &'a Tree<T>,
-    child: Option<Node>,
+pub struct ChildIter<'a> {
+    iter: slice::Iter<'a, Node>,
 }
 
 
@@ -214,12 +207,11 @@ impl<T> Tree<T> {
     }
 
     /// Get an iterator over the children of a node
-    pub fn children(&self, node: Node) -> ChildIter<T> {
+    pub fn children(&self, node: Node) -> ChildIter {
         ChildIter {
-            tree:  self,
-            child: match self.node(node).data {
-                TypedNodeData::Internal(child) => Some(child),
-                _                              => None,
+            iter: match self.node(node).data {
+                TypedNodeData::Internal(ref children) => children.iter(),
+                _                                     => [].iter(),
             },
         }
     }
@@ -227,16 +219,6 @@ impl<T> Tree<T> {
     /// Get the parent of a node
     pub fn parent(&self, node: Node) -> Option<Node> {
         self.node(node).parent
-    }
-
-    /// Get the left sibling of a node
-    pub fn left(&self, node: Node) -> Option<Node> {
-        self.node(node).left
-    }
-
-    /// Get the right sibling of a node
-    pub fn right(&self, node: Node) -> Option<Node> {
-        self.node(node).right
     }
 
     /// Is this node a leaf?
@@ -271,19 +253,9 @@ impl<T> Tree<T> {
     /// Prune the given leaf from the tree
     pub fn prune_leaf(&mut self, leaf: Leaf) {
         let node   = self.leaf(leaf);
-        let parent = self.parent(node);
-        let left   = self.left(node);
-        let right  = self.right(node);
 
-        if let Some(parent) = parent {
-            if let Some(left) = left {
-                self.nodes[left.id()].item_mut().right = right;
-            } else {
-                self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(right.unwrap());
-            }
-            if let Some(right) = right {
-                self.nodes[right.id()].item_mut().left = left;
-            }
+        if let Some(parent) = self.parent(node) {
+            self.remove_child(parent, node);
         } else {
             self.root = None;
         }
@@ -297,25 +269,15 @@ impl<T> Tree<T> {
     /// Reattach the given leaf to the tree.  It gets attached to the node that was the parent
     /// before it was removed.
     pub fn restore_leaf(&mut self, leaf: Leaf) {
+
         self.leaves[leaf.id()].as_mut().unwrap().restore();
         let node = self.leaf(leaf);
-        self.nodes[node.id()].restore();
+self.nodes[node.id()].restore();
         self.leaf_count += 1;
         self.node_count += 1;
 
-        let parent = self.parent(node);
-        let left   = self.left(node);
-        let right  = self.right(node);
-
-        if let Some(parent) = parent {
-            if let Some(left) = left {
-                self.nodes[left.id()].item_mut().right = Some(node);
-            } else {
-                self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
-            }
-            if let Some(right) = right {
-                self.nodes[right.id()].item_mut().left = Some(node);
-            }
+        if let Some(parent) = self.parent(node) {
+            self.add_child(parent, node);
         } else {
             self.root = Some(node);
         }
@@ -323,37 +285,20 @@ impl<T> Tree<T> {
 
     /// Suppress a node with only one child and return the child
     pub fn suppress_node(&mut self, node: Node) -> Node {
-        let parent = self.parent(node);
-        let left   = self.left(node);
-        let right  = self.right(node);
-        let child  = match self.nodes[node.id()].item().data {
 
-            TypedNodeData::Leaf(_, _) => {
-                panic!("Cannot suppress leaf");
-            },
-
-            TypedNodeData::Internal(child) => {
-                {
-                    let child_data = self.nodes[child.id()].item_mut();
-                    child_data.parent = parent;
-                    child_data.left   = left;
-                    child_data.right  = right;
-                }
-                if let Some(parent) = parent {
-                    if let Some(left) = left {
-                        self.nodes[left.id()].item_mut().right = Some(child);
-                    } else {
-                        self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(child);
-                    }
-                    if let Some(right) = right {
-                        self.nodes[right.id()].item_mut().left = Some(child);
-                    }
-                } else {
-                    self.root = Some(child);
-                }
-                child
-            },
+        let child = if let TypedNodeData::Internal(ref children) = self.node(node).data {
+            children[0]
+        } else {
+            panic!("Cannot suppress leaf!");
         };
+
+        let parent = self.parent(node);
+        self.nodes[child.id()].item_mut().parent = parent;
+        if let Some(parent) = parent {
+            self.replace_child(parent, node, child);
+        } else {
+            self.root = Some(child);
+        }
 
         self.node_count -= 1;
         self.nodes[node.id()].remove();
@@ -367,36 +312,53 @@ impl<T> Tree<T> {
         self.node_count += 1;
         self.nodes[node.id()].restore();
 
-        let parent = self.parent(node);
-        let left   = self.left(node);
-        let right  = self.right(node);
+        let child = if let TypedNodeData::Internal(ref children) = self.node(node).data {
+            children[0]
+        } else {
+            panic!("Cannot restore leaf since it was not suppressed");
+        };
 
-        match self.nodes[node.id()].item().data {
+        self.nodes[child.id()].item_mut().parent = Some(node);
+        if let Some(parent) = self.parent(node) {
+            self.replace_child(parent, child, node);
+        } else {
+            self.root = Some(node);
+        }
+    }
 
-            TypedNodeData::Leaf(_, _) => {
-                panic!("Cannot restore leaf since it was not suppressed");
-            },
+    /// Add a child to a given node
+    fn add_child(&mut self, parent: Node, child: Node) {
+        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
+            children.push(child);
+        } else {
+            panic!("Cannot add a child to a leaf!");
+        }
+    }
 
-            TypedNodeData::Internal(child) => {
-                {
-                    let child_data = self.nodes[child.id()].item_mut();
-                    child_data.parent = Some(node);
-                    child_data.left   = None;
-                    child_data.right  = None;
+    /// Remove a child from a given node
+    fn remove_child(&mut self, parent: Node, child: Node) {
+        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
+            match children.iter().position(|&c| c == child) {
+                Some(pos) => { children.swap_remove(pos); },
+                None      => panic!("Cannot remove nonexistent child!"),
+            }
+        } else {
+            panic!("Cannot remove a child from a leaf!");
+        }
+    }
+
+    /// Rplace a child with a different child
+    fn replace_child(&mut self, parent: Node, old_child: Node, new_child: Node) {
+        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
+            for child in children.iter_mut() {
+                if *child == old_child {
+                    *child = new_child;
+                    return;
                 }
-                if let Some(parent) = parent {
-                    if let Some(left) = left {
-                        self.nodes[left.id()].item_mut().right = Some(node);
-                    } else {
-                        self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
-                    }
-                    if let Some(right) = right {
-                        self.nodes[right.id()].item_mut().left = Some(node);
-                    }
-                } else {
-                    self.root = Some(node);
-                }
-            },
+            }
+            panic!("Cannot replace non-existent child!");
+        } else {
+            panic!("Cannot replace children of a leaf!");
         }
     }
 
@@ -409,7 +371,6 @@ impl<T> Tree<T> {
     fn node_mut(&mut self, node: Node) -> &mut NodeData<T> {
         self.nodes[node.id()].item_mut()
     }
-
 }
 
 
@@ -447,15 +408,12 @@ impl<'a> Iterator for LeafIter<'a> {
 }
 
 
-impl<'a, T: 'a> Iterator for ChildIter<'a, T> {
+impl<'a> Iterator for ChildIter<'a> {
 
     type Item = Node;
 
     fn next(&mut self) -> Option<Node> {
-        self.child.map(|node| {
-            self.child = self.tree.node(node).right;
-            node
-        })
+        self.iter.next().map(|node| *node)
     }
 }
 
@@ -506,8 +464,6 @@ where T: Clone + Eq + Hash {
             t.leaves[leaf.id()] = Some(Removable::new(node));
             t.nodes.push(Removable::new(NodeData {
                 parent: None,
-                left:   None,
-                right:  None,
                 data:   TypedNodeData::Leaf(*leaf, label),
             }));
             t.node_count += 1;
@@ -520,21 +476,13 @@ where T: Clone + Eq + Hash {
     pub fn new_node(&mut self, children: Vec<Node>) -> Node {
         self.current_tree.as_mut().map(|t| {
             let node = Node(t.nodes.len());
+            for child in &children {
+                t.node_mut(*child).parent = Some(node);
+            }
             t.nodes.push(Removable::new(NodeData {
                 parent: None,
-                left:   None,
-                right:  None,
-                data:   TypedNodeData::Internal(children[0]),
+                data:   TypedNodeData::Internal(children),
             }));
-            let mut last = None;
-            for child in children.into_iter() {
-                t.node_mut(child).left   = last;
-                t.node_mut(child).parent = Some(node);
-                if let Some(node) = last {
-                    t.node_mut(node).right = Some(child);
-                }
-                last = Some(child);
-            }
             t.node_count += 1;
             node
         }).unwrap()
@@ -743,36 +691,6 @@ mod tests {
         for _ in 0..8 {
             assert_eq!(trees[1].parent(nodes1.next().unwrap()),
             answers1.next().unwrap().map(|id| Node::new(id)));
-        }
-    }
-
-    /// Test that left and right siblings are reported correctly
-    #[test]
-    fn build_tree_siblings() {
-        let trees       = build_tree();
-        let mut nodes0  = trees[0].nodes();
-        let mut lefts0  = [
-            None, Some(5), Some(0), Some(2), None, None, Some(4), Some(6), None].into_iter();
-        let mut rights0 = [
-            Some(2), None, Some(3), None, Some(6), Some(1), Some(7), None, None].into_iter();
-        let mut nodes1  = trees[1].nodes();
-        let mut lefts1  = [
-            Some(4), None, Some(6), None, Some(3), Some(1), None, None].into_iter();
-        let mut rights1 = [
-            None, Some(5), None, Some(4), Some(0), None, Some(2), None].into_iter();
-        for _ in 0..9 {
-            let node  = nodes0.next().unwrap();
-            let left  = lefts0.next().unwrap().map(|id| Node::new(id));
-            let right = rights0.next().unwrap().map(|id| Node::new(id));
-            assert_eq!(trees[0].left(node), left);
-            assert_eq!(trees[0].right(node), right);
-        }
-        for _ in 0..8 {
-            let node  = nodes1.next().unwrap();
-            let left  = lefts1.next().unwrap().map(|id| Node::new(id));
-            let right = rights1.next().unwrap().map(|id| Node::new(id));
-            assert_eq!(trees[1].left(node), left);
-            assert_eq!(trees[1].right(node), right);
         }
     }
 
