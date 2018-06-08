@@ -5,8 +5,8 @@
 
 
 use std::default::Default;
-use std::marker::PhantomData;
-use tree::traits::{Id, Tree, TreeBuilder};
+use std::hash::Hash;
+use tree::{Node, Tree, TreeBuilder};
 //use tree_child_sequence::{Pair, TcSeq};
 
 
@@ -31,19 +31,13 @@ pub enum LoC<T> {
 /// Partition the input trees into clusters.  In the output, the clusters are arranged bottom-up,
 /// that is, the cluster containing the leaf representing another cluster C follows C in the
 /// cluster sequence.
-pub fn partition<Label, T, TNode, C, CNode, B>(trees: Vec<T>) -> Vec<Vec<C>>
-where for<'t> T: Tree<'t, Label, Node=TNode>,
-      for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-      B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
-      Label:     Clone,
-      TNode:     Copy + Id + PartialEq + Ord,
-      CNode:     Copy + Default + Id + PartialEq + Ord {
+pub fn partition<T: Clone + Eq + Hash>(trees: Vec<Tree<T>>) -> Vec<Vec<Tree<LoC<T>>>> {
 
     let (num_clusters, cluster_nodes) = {
 
         // Compute an interval labelling for every tree and pair each tree with its labelling
         let intervals = trees.iter().map(leaf_intervals);
-        let numbered_trees: Vec<(&T, Vec<(usize, usize)>)>
+        let numbered_trees: Vec<(&Tree<T>, Vec<(usize, usize)>)>
             = trees.iter().zip(intervals).collect();
 
         // Map nodes of the first tree to the LCAs of their descendant leaves in all other trees
@@ -58,40 +52,33 @@ where for<'t> T: Tree<'t, Label, Node=TNode>,
     };
 
     // Decompose the trees into clusters
-    decompose_trees::<Label, T, TNode, C, CNode, B>(trees, num_clusters, cluster_nodes)
+    decompose_trees(trees, num_clusters, cluster_nodes)
 }
 
 
 /// Number the leaves in `tree` left to right and label every node with the interval of numbers of
 /// its descendant leaves.
-fn leaf_intervals<Label, T>(tree: &T) -> Vec<(usize, usize)>
-where for<'t> T: Tree<'t, Label> {
+fn leaf_intervals<T>(tree: &Tree<T>) -> Vec<(usize, usize)> {
     LeafLabeller::new(tree).run()
 }
 
 
 /// The status of the leaf labelling process
-struct LeafLabeller<'t, Label, T>
-where T:     't + Tree<'t, Label>,
-      Label: 't {
-    tree:       &'t T,
+struct LeafLabeller<'t, T: 't> {
+    tree:       &'t Tree<T>,
     next_label: usize,
     intervals:  Vec<(usize, usize)>,
-    phantom:    PhantomData<Label>,
 }
 
 
-impl<'t, Label, T> LeafLabeller<'t, Label, T>
-where T:     't + Tree<'t, Label>,
-      Label: 't {
+impl<'t, T: 't> LeafLabeller<'t, T> {
     
     /// Create a new `LeafLabeller` for the given tree
-    fn new(tree: &'t T) -> Self {
+    fn new(tree: &'t Tree<T>) -> Self {
         LeafLabeller {
             tree,
             next_label: 0,
             intervals:  vec![Default::default(); tree.node_count()],
-            phantom:    PhantomData,
         }
     }
 
@@ -103,7 +90,7 @@ where T:     't + Tree<'t, Label>,
 
     /// Traverse the subtree rooted at the given node to compute the intervals of the nodes in this
     /// subtree
-    fn traverse(&mut self, node: T::Node) {
+    fn traverse(&mut self, node: Node) {
 
         if self.tree.is_leaf(node) {
 
@@ -127,47 +114,39 @@ where T:     't + Tree<'t, Label>,
 
 
 /// Map every node in tree t1 to the LCA of its descendant leaves in t2
-fn map_to_lca<'t, Label, T, TNode>(
-    t1: &'t (&'t T, Vec<(usize, usize)>),
-    t2: &'t (&'t T, Vec<(usize, usize)>)) -> Vec<TNode>
-where T:     't + Tree<'t, Label, Node=TNode>,
-      Label: 't,
-      TNode: Copy + Id + PartialEq + Ord {
+fn map_to_lca<T>(t1: &(&Tree<T>, Vec<(usize, usize)>),
+                 t2: &(&Tree<T>, Vec<(usize, usize)>)) -> Vec<Node> {
     LcaMapper::new(t1, t2).run()
 }
 
 
 /// The status of the LCA mapping process
-struct LcaMapper<'t, Label, T>
-where Label: 't,
-      T:     't + Tree<'t, Label> {
+struct LcaMapper<'t, T: 't> {
 
     /// The tree to be mapped
-    tree: &'t T,
+    tree: &'t Tree<T>,
 
     /// Mapping from nodes to their parents in the tree to be mapped to.  (Extracted from the tree
     /// because the mapping process shortcuts these pointers to guarantee linear time.)
-    parents: Vec<Option<T::Node>>,
+    parents: Vec<Option<Node>>,
 
     /// The leaf intervals associated with the nodes in the second tree.
     intervals: &'t Vec<(usize, usize)>,
 
     /// The constructed mapping
-    mapping: Vec<T::Node>,
+    mapping: Vec<Node>,
 }
 
 
-impl<'t, Label, T> LcaMapper<'t, Label, T>
-where Label: 't,
-      T:     't + Tree<'t, Label> {
+impl<'t, T: 't> LcaMapper<'t, T> {
 
     /// Create a new `LcaMapper` for a pair of trees whose nodes have been numbered with leaf
     /// intervals.
-    fn new(t1: &'t (&'t T, Vec<(usize, usize)>),
-           t2: &'t (&'t T, Vec<(usize, usize)>)) -> Self {
+    fn new(t1: &'t (&'t Tree<T>, Vec<(usize, usize)>),
+           t2: &'t (&'t Tree<T>, Vec<(usize, usize)>)) -> Self {
 
         // Set up the initial mapping between matching leaves
-        let mut mapping = vec![T::Node::new(0); t1.0.node_count()];
+        let mut mapping = vec![Node::new(0); t1.0.node_count()];
         for leaf in t1.0.leaves() {
             mapping[leaf.id()] = t2.0.leaf(t1.0.leaf_id(leaf).unwrap());
         }
@@ -182,14 +161,14 @@ where Label: 't,
     }
 
     /// Run the LCA mapper
-    fn run(mut self) -> Vec<T::Node> {
+    fn run(mut self) -> Vec<Node> {
         self.traverse(self.tree.root().unwrap());
         self.mapping
     }
 
     /// Traverse the subtree of `self.t1` rooted in the given node and map all nodes in the subtree
     /// to corresponding nodes in `self.t2`.
-    fn traverse(&mut self, node: T::Node) -> T::Node {
+    fn traverse(&mut self, node: Node) -> Node {
 
         if !self.tree.is_leaf(node) {
 
@@ -231,13 +210,9 @@ fn contains(i1: (usize, usize), i2: (usize, usize)) -> bool {
 
 
 /// Identify all nodes that are roots of clusters
-fn identify_clusters<'t, Label, T, TNode>(
-    tree:          &'t T,
-    forward_maps:  Vec<Vec<TNode>>,
-    backward_maps: Vec<Vec<TNode>>) -> (usize, Vec<Vec<Option<usize>>>)
-where T:      't + Tree<'t, Label, Node=TNode>,
-      Label:  't,
-      TNode:  Copy + Id + PartialEq + Ord {
+fn identify_clusters<T>(tree:          &Tree<T>,
+                        forward_maps:  Vec<Vec<Node>>,
+                        backward_maps: Vec<Vec<Node>>) -> (usize, Vec<Vec<Option<usize>>>) {
 
     let mut cluster_nodes = vec![];
     cluster_nodes.push(vec![None; forward_maps[0].len()]);
@@ -246,7 +221,7 @@ where T:      't + Tree<'t, Label, Node=TNode>,
     }
     let mut cluster_id = 0;
     'l: for node in 0..forward_maps[0].len() {
-        if tree.is_leaf(TNode::new(node)) {
+        if tree.is_leaf(Node::new(node)) {
             continue 'l
         }
         for t in 0..forward_maps.len() {
@@ -266,18 +241,12 @@ where T:      't + Tree<'t, Label, Node=TNode>,
 
 /// Decompose the trees into clusters based on LCA mappings between the first tree and the other
 /// trees
-fn decompose_trees<Label, T, TNode, C, CNode, B>(
-    trees:         Vec<T>,
+fn decompose_trees<T: Clone + Eq + Hash>(
+    trees:         Vec<Tree<T>>,
     num_clusters:  usize,
-    cluster_nodes: Vec<Vec<Option<usize>>>) -> Vec<Vec<C>>
-where for<'t> T: Tree<'t, Label, Node=TNode>,
-      for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-      B:         TreeBuilder<LoC<Label>, Node=CNode, Tree=C>,
-      Label:     Clone,
-      CNode:     Copy + Default + Id + PartialEq,
-      TNode:     Copy + Id + PartialEq + Ord {
+    cluster_nodes: Vec<Vec<Option<usize>>>) -> Vec<Vec<Tree<LoC<T>>>> {
 
-    let mut decomp = Decomposer::<Label, B, C, CNode>::new(num_clusters);
+    let mut decomp = Decomposer::new(num_clusters);
     for (t, cs) in trees.into_iter().zip(cluster_nodes) {
         decomp.run(t, cs);
     }
@@ -286,49 +255,35 @@ where for<'t> T: Tree<'t, Label, Node=TNode>,
 
 
 /// The state of the cluster decomposition process
-struct Decomposer<Label, B, C, CNode>
-where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-      B:         TreeBuilder<LoC<Label>, Tree=C> {
+struct Decomposer<T> {
 
     /// Tree builders used to build the trees in the different clusters
-    builders: Vec<B>,
-
-    phantom: PhantomData<Label>,
+    builders: Vec<TreeBuilder<LoC<T>>>,
 }
 
 
-impl<Label, B, C, CNode> Decomposer<Label, B, C, CNode>
-where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
-      CNode:     Copy + Default + Id + PartialEq,
-      B:         TreeBuilder<LoC<Label>, Tree=C, Node=CNode> {
+impl<T: Clone + Eq + Hash> Decomposer<T> {
 
     /// Construct a new decomposer capable of building num_clusters + 1 clusters
     fn new(num_clusters: usize) -> Self {
         let mut builders = vec![];
         for _ in 0..num_clusters {
-            builders.push(B::new());
+            builders.push(TreeBuilder::new());
         }
-        Decomposer { builders, phantom: PhantomData }
+        Decomposer { builders }
     }
 
     /// Decompose tree into its clusters
-    fn run<T, TNode>(&mut self, tree: T, cluster_nodes: Vec<Option<usize>>)
-    where for<'t> T: Tree<'t, Label, Node=TNode>,
-          Label:     Clone,
-          TNode:     Copy + Id + PartialEq + Ord {
+    fn run(&mut self, tree: Tree<T>, cluster_nodes: Vec<Option<usize>>) {
         self.traverse(&tree, &cluster_nodes, tree.root().unwrap(), None);
     }
 
     /// Traverse the tree from the given node
-    fn traverse<T, TNode>(
-        &mut self,
-        tree:          &T,
-        cluster_nodes: &Vec<Option<usize>>,
-        node:          TNode,
-        cluster:       Option<usize>) -> CNode
-    where for<'t> T: Tree<'t, Label, Node=TNode>,
-          Label:     Clone,
-          TNode:     Copy + Id + PartialEq + Ord {
+    fn traverse(&mut self,
+                tree:          &Tree<T>,
+                cluster_nodes: &Vec<Option<usize>>,
+                node:          Node,
+                cluster:       Option<usize>) -> Node {
 
         if tree.is_leaf(node) {
 
@@ -361,7 +316,7 @@ where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
     }
 
     /// Collect the clusters constructed by the decomposer
-    fn clusters(self) -> Vec<Vec<C>> {
+    fn clusters(self) -> Vec<Vec<Tree<LoC<T>>>> {
         self.builders.into_iter().map(|b| b.trees()).collect()
     }
 }
@@ -420,9 +375,6 @@ where for<'c> C: Tree<'c, LoC<Label>, Node=CNode>,
 mod tests {
 
     use super::*;
-    use tree::{Node, Tree, TreeBuilder};
-    use tree::traits::Tree as TreeTrait;
-    use tree::traits::TreeBuilder as TreeBuilderTrait;
     use newick;
 
     /// Construct a forest to be used in subsequent tests
@@ -590,11 +542,7 @@ mod tests {
             identify_clusters(&trees[0], forward_maps, backward_maps)
         };
         let clusters =
-            with_string_labels(decompose_trees::<
-                               String,
-                               Tree<String>, Node,
-                               Tree<LoC<String>>, Node,
-                               TreeBuilder<LoC<String>>>(trees, num_clusters, cluster_nodes));
+            with_string_labels(decompose_trees(trees, num_clusters, cluster_nodes));
         assert_eq!(clusters.len(), 5);
         let expected_newicks = [
             "((o,n),(l,m,p));\n(l,((m,n),(o,p)));\n(l,((o,n,p),m));\n",
@@ -612,11 +560,7 @@ mod tests {
     #[test]
     fn test_partition() {
         let trees = build_forest();
-        let clusters = with_string_labels(partition::<
-                                          String,
-                                          Tree<String>, Node,
-                                          Tree<LoC<String>>, Node,
-                                          TreeBuilder<LoC<String>>>(trees));
+        let clusters = with_string_labels(partition(trees));
         assert_eq!(clusters.len(), 5);
         let expected_newicks = [
             "((o,n),(l,m,p));\n(l,((m,n),(o,p)));\n(l,((o,n,p),m));\n",

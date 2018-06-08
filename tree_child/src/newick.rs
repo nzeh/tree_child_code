@@ -26,7 +26,7 @@
 //! in the context of computing tree-child hybridization networks.
 
 
-use tree::traits::{Tree, TreeBuilder};
+use tree::{Node, Tree, TreeBuilder};
 use std::fmt::Write;
 use std::iter;
 use std::result;
@@ -51,24 +51,22 @@ struct Pos(usize, usize);
 
 
 /// Parse a given one-line Newick string using the given tree builder
-pub fn parse_tree<B>(builder: &mut B, newick: &str) -> Result<()>
-where B: TreeBuilder<String> {
+pub fn parse_tree(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_tree()
 }
 
 
 /// Parse a given multi-line Newick string using the given tree builder
-pub fn parse_forest<B>(builder: &mut B, newick: &str) -> Result<()>
-where B: TreeBuilder<String> {
+pub fn parse_forest(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_forest()
 }
 
 
 /// Struct representing the state of the Newick parser
-struct Parser<'b, 'i, B: 'b + TreeBuilder<String>> {
+struct Parser<'b, 'i> {
 
     /// The builder used to build the tree
-    builder: &'b mut B,
+    builder: &'b mut TreeBuilder<String>,
 
     /// The current input position
     pos: Pos,
@@ -77,12 +75,11 @@ struct Parser<'b, 'i, B: 'b + TreeBuilder<String>> {
     chars: iter::Peekable<str::Chars<'i>>,
 }
 
-impl<'b, 'i, B> Parser<'b, 'i, B>
-where B: 'b + TreeBuilder<String> {
+impl<'b, 'i> Parser<'b, 'i> {
 
     /// Create a new parser that parses the given Newick string and uses the given builder to
     /// construct the corresponding tree.
-    fn new(builder: &'b mut B, newick: &'i str) -> Parser<'b, 'i, B> {
+    fn new(builder: &'b mut TreeBuilder<String>, newick: &'i str) -> Parser<'b, 'i> {
         Parser {
             builder,
             pos:   Pos(1, 1),
@@ -158,7 +155,7 @@ where B: 'b + TreeBuilder<String> {
     }
 
     /// Parse one subtree
-    fn parse_subtree(&mut self) -> Result<B::Node> {
+    fn parse_subtree(&mut self) -> Result<Node> {
         self.skip_spaces();
         match self.chars.peek() {
             Some('(') => {
@@ -178,7 +175,7 @@ where B: 'b + TreeBuilder<String> {
     }
 
     /// Parse a list of subtrees
-    fn parse_subtrees(&mut self) -> Result<Vec<B::Node>> {
+    fn parse_subtrees(&mut self) -> Result<Vec<Node>> {
         let mut nodes = vec![];
         let node = self.parse_subtree()?;
         nodes.push(node);
@@ -245,8 +242,7 @@ where B: 'b + TreeBuilder<String> {
 
 
 /// Format a tree into a Newick string
-pub fn format_tree<T>(tree: &T) -> Option<String>
-where for<'t> T: Tree<'t, String> {
+pub fn format_tree(tree: &Tree<String>) -> Option<String> {
     let mut newick = String::new();
     format_one_tree(tree, &mut newick)?;
     Some(newick)
@@ -254,8 +250,7 @@ where for<'t> T: Tree<'t, String> {
 
 
 /// Format a forest into a Newick string, one line per tree
-pub fn format_forest<T>(forest: &[T]) -> Option<String>
-where for<'t> T: Tree<'t, String> {
+pub fn format_forest(forest: &[Tree<String>]) -> Option<String> {
     let mut newick = String::new();
     for tree in forest {
         format_one_tree(tree, &mut newick)?;
@@ -266,11 +261,9 @@ where for<'t> T: Tree<'t, String> {
 
 
 /// Format a tree into a Newick string, held in a given string buffer
-fn format_one_tree<T>(tree: &T, newick: &mut String) -> Option<()>
-where for<'t> T: Tree<'t, String> {
+fn format_one_tree(tree: &Tree<String>, newick: &mut String) -> Option<()> {
 
-    fn visit_node<'t, T>(tree: &'t T, newick: &mut String, node: T::Node) -> Option<()>
-    where T: 't + Tree<'t, String> {
+    fn visit_node(tree: &Tree<String>, newick: &mut String, node: Node) -> Option<()> {
         if tree.is_leaf(node) {
             newick.write_str(&tree.label(node)?).unwrap();
         } else {
@@ -299,274 +292,12 @@ where for<'t> T: Tree<'t, String> {
 #[cfg(test)]
 mod tests {
 
-    use std::slice;
     use super::*;
-    use tree::traits::Id;
-
-    /// Representation of a tree in the implementation of these tests
-    struct TestTree {
-
-        /// The root of the tree
-        root: Option<usize>,
-
-        /// Association list between internal nodes and the lists of their children
-        internal_nodes: Vec<(usize, Vec<usize>)>,
-
-        /// Association list between leaves and their leaf IDs and labels
-        leaves: Vec<(usize, usize, String)>,
-    }
-
-    impl<'a> Tree<'a, String> for TestTree {
-
-        type Node = usize;
-
-        type Leaf = usize;
-
-        type NodeIter = TestNodeIter<'a>;
-
-        type LeafIter = TestLeafIter<'a>;
-
-        type ChildIter = TestChildIter<'a>;
-
-        fn new() -> Self {
-            TestTree {
-                root:           None,
-                internal_nodes: vec![],
-                leaves:         vec![],
-            }
-        }
-
-        fn node_count(&'a self) -> usize {
-            self.internal_nodes.len() + self.leaves.len()
-        }
-
-        fn root(&'a self) -> Option<usize> {
-            self.root
-        }
-
-        fn nodes(&'a self) -> TestNodeIter<'a> {
-            TestNodeIter {
-                internal_nodes: self.internal_nodes.iter(),
-                leaves:         self.leaves.iter(),
-            }
-        }
-
-        fn leaves(&'a self) -> TestLeafIter<'a> {
-            TestLeafIter {
-                leaves: self.leaves.iter(),
-            }
-        }
-
-        fn children(&'a self, node: usize) -> TestChildIter<'a> {
-            for (parent, children) in self.internal_nodes.iter() {
-                if *parent == node {
-                    return TestChildIter::HasChildren(children.iter());
-                }
-            }
-            TestChildIter::HasNoChildren
-        }
-
-        fn parent(&'a self, node: usize) -> Option<usize> {
-            for (parent, children) in self.internal_nodes.iter() {
-                for child in children {
-                    if *child == node {
-                        return Some(*parent);
-                    }
-                }
-            }
-            None
-        }
-
-        fn left(&'a self, node: usize) -> Option<usize> {
-            for (_, children) in self.internal_nodes.iter() {
-                let mut last = None;
-                for child in children {
-                    if *child == node {
-                        return last;
-                    }
-                    last = Some(*child);
-                }
-            }
-            None
-        }
-
-        fn right(&'a self, node: usize) -> Option<usize> {
-            for (_, children) in self.internal_nodes.iter() {
-                let mut last = None;
-                for child in children {
-                    if last == Some(node) {
-                        return Some(*child);
-                    }
-                    last = Some(*child);
-                }
-            }
-            None
-        }
-
-        fn is_leaf(&'a self, node: usize) -> bool {
-            for (leaf, _, _) in self.leaves.iter() {
-                if *leaf == node {
-                    return true;
-                }
-            }
-            false
-        }
-
-        fn leaf_id(&'a self, node: usize) -> Option<usize> {
-            for (leaf, id, _) in self.leaves.iter() {
-                if *leaf == node {
-                    return Some(*id);
-                }
-            }
-            None
-        }
-
-        fn label(&'a self, node: usize) -> Option<&String> {
-            for (leaf, _, label) in self.leaves.iter() {
-                if *leaf == node {
-                    return Some(label);
-                }
-            }
-            None
-        }
-
-        fn leaf(&'a self, leaf: usize) -> usize {
-            for (node, id, _) in self.leaves.iter() {
-                if leaf == *id {
-                    return *node;
-                }
-            }
-            panic!("Trying to retrieve node ID of a non-existent leaf.");
-        }
-    }
-
-    struct TestNodeIter<'a> {
-        internal_nodes: slice::Iter<'a, (usize, Vec<usize>)>,
-        leaves: slice::Iter<'a, (usize, usize, String)>,
-    }
-
-    impl<'a> Iterator for TestNodeIter<'a> {
-
-        type Item = usize;
-
-        fn next(&mut self) -> Option<usize> {
-            match self.internal_nodes.next() {
-                Some((node, _)) => Some(*node),
-                None            => self.leaves.next().map(|(node, _, _)| *node),
-            }
-        }
-    }
-
-    struct TestLeafIter<'a> {
-        leaves: slice::Iter<'a, (usize, usize, String)>,
-    }
-
-    impl<'a> Iterator for TestLeafIter<'a> {
-
-        type Item = usize;
-
-        fn next(&mut self) -> Option<usize> {
-            self.leaves.next().map(|(node, _, _)| *node)
-        }
-    }
-
-
-    enum TestChildIter<'a> {
-        HasChildren(slice::Iter<'a, usize>),
-        HasNoChildren,
-    }
-
-    impl<'a> Iterator for TestChildIter<'a> {
-
-        type Item = usize;
-
-        fn next(&mut self) -> Option<usize> {
-            match self {
-                TestChildIter::HasNoChildren     => None,
-                TestChildIter::HasChildren(iter) => iter.next().map(|node| *node),
-            }
-        }
-    }
-
-    impl Id for usize {
-
-        fn new(id: usize) -> usize {
-            id
-        }
-
-        fn id(self) -> usize {
-            self
-        }
-
-    }
-
-    /// Tree builder instance used in these tests
-    struct TestTreeBuilder {
-
-        /// The next available node ID
-        next_id: usize,
-
-        /// The tree currently under construction
-        current_tree: Option<TestTree>,
-
-        /// The list of trees constructed so far
-        trees: Vec<TestTree>,
-    }
-
-    impl TreeBuilder<String> for TestTreeBuilder {
-
-        type Node = usize;
-
-        type Tree = TestTree;
-
-        fn new() -> Self {
-            TestTreeBuilder {
-                next_id:      0,
-                current_tree: None,
-                trees:        vec![],
-            }
-        }
-
-        fn new_tree(&mut self) {
-            self.current_tree = Some(TestTree::new());
-        }
-
-        fn new_leaf(&mut self, label: String) -> usize {
-
-            let node_id = self.next_id;
-            self.next_id += 1;
-
-            let leaf_id = self.current_tree.as_ref().unwrap().leaves.len();
-
-            self.current_tree.as_mut().unwrap().leaves.push((node_id, leaf_id, label));
-
-            node_id
-        }
-
-        fn new_node(&mut self, children: Vec<usize>) -> usize {
-
-            let node_id = self.next_id;
-            self.next_id += 1;
-
-            self.current_tree.as_mut().unwrap().internal_nodes.push((node_id, children));
-
-            node_id
-        }
-
-        fn finish_tree(&mut self, root: usize) {
-            self.current_tree.as_mut().unwrap().root = Some(root);
-            self.trees.push(self.current_tree.take().unwrap());
-        }
-
-        fn trees(self) -> Vec<TestTree> {
-            self.trees
-        }
-    }
 
     /// Test that a well-formed one-line Newick string is parsed and formatted correctly.
     #[test]
     fn parse_tree_success() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "(a,foo_bar$:432,((c,  d   )e:12  ,(  f,g,h)i,j));").is_ok());
         let trees = builder.trees();
         assert_eq!(trees.len(), 1);
@@ -577,7 +308,7 @@ mod tests {
     /// Test that a well-formed multi-line Newick string is parsed and formatted correctly.
     #[test]
     fn parse_forest_success() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "(((a,b),c),(d,e))   ;\nf;\n(g,((h,i),j));").is_ok());
         let trees = builder.trees();
         assert_eq!(trees.len(), 3);
@@ -588,77 +319,77 @@ mod tests {
     /// Test that parse_tree rejects a multi-line string.
     #[test]
     fn parse_tree_multiline_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "(((a,b),c),(d,e))   ;\nf;\n(g,((h,i),j));").is_err());
     }
 
     /// Test that parse_tree rejects a string with multiple pairs of top-level parentheses.
     #[test]
     fn parse_tree_missing_root_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "((a,b),c)(d,(e,f));").is_err());
     }
 
     /// Test that parse_tree rejects a string with two semicolons.
     #[test]
     fn parse_tree_two_semicolons_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "((a,b),c);(d,(e,f));").is_err());
     }
 
     /// Test that parse_tree rejects a string with a missing closing parenthesis.
     #[test]
     fn parse_tree_missing_close_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "((a,b),c);(d,(e,f);").is_err());
     }
 
     /// Test that parse_tree rejects a string with two many closing parentheses.
     #[test]
     fn parse_tree_excess_close_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "((a,b),c));(d,(e,f));").is_err());
     }
 
     /// Test that parse_tree rejects a string with two edge lengths attached to a single node.
     #[test]
     fn parse_tree_two_edge_lengths_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_tree(&mut builder, "((a,b:34:1),c));(d,(e,f));").is_err());
     }
 
     /// Test that parse_forest rejects a string with multiple pairs of top-level parentheses.
     #[test]
     fn parse_forest_missing_root_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b),c)(d,(e,f));").is_err());
     }
 
     /// Test that parse_forest rejects a string with two semicolons.
     #[test]
     fn parse_forest_two_semicolons_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b),c);(d,(e,f));").is_err());
     }
 
     /// Test that parse_forest rejects a string with a missing closing parenthesis.
     #[test]
     fn parse_forest_missing_close_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b),c);(d,(e,f);").is_err());
     }
 
     /// Test that parse_forest rejects a string with two many closing parentheses.
     #[test]
     fn parse_forest_excess_close_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b),c));(d,(e,f));").is_err());
     }
 
     /// Test that parse_forest rejects a string with two edge lengths attached to a single node.
     #[test]
     fn parse_forest_two_edge_lengths_failure() {
-        let mut builder = TestTreeBuilder::new();
+        let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b:34:1),c));(d,(e,f));").is_err());
     }
 }

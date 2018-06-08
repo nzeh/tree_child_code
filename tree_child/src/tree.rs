@@ -3,122 +3,6 @@ use std::hash::Hash;
 use std::slice;
 
 
-/// The traits for interacting with trees
-pub mod traits {
-
-    /// The trait that needs to be implemented by identifier types
-    pub trait Id {
-
-        /// Create an ID corresponding to the given integer
-        fn new(id: usize) -> Self;
-
-        /// Access the integer wrapped by the ID
-        fn id(self) -> usize;
-    }
-
-    /// A tree accessor trait used by the Newick writer and other parts of the code to explore a
-    /// tree.
-    pub trait Tree<'a, T: 'a> {
-
-        /// The node type for the tree
-        type Node: Clone + Copy + Id + PartialEq + Ord;
-
-        /// The type used to identify leaves
-        type Leaf: Clone + Copy + Id + PartialEq + Ord;
-
-        /// An iterator over the nodes of the tree
-        type NodeIter: Iterator<Item=Self::Node>;
-
-        /// An iterator over the leaves of the tree
-        type LeafIter: Iterator<Item=Self::Node>;
-
-        /// An iterator over the children of a node
-        type ChildIter: Iterator<Item=Self::Node>;
-
-        /// Create a new tree
-        fn new() -> Self;
-
-        /// Access the number of nodes in the tree
-        fn node_count(&self) -> usize;
-
-        /// Access the number of leaves in the tree
-        fn leaf_count(&self) -> usize;
-
-        /// Access the root of the next tree
-        fn root(&self) -> Option<Self::Node>;
-
-        /// Access the nodes of the tree
-        fn nodes(&self) -> Self::NodeIter;
-
-        /// Access the leaves of the tree
-        fn leaves(&'a self) -> Self::LeafIter;
-
-        /// Access the children of a node
-        fn children(&'a self, node: Self::Node) -> Self::ChildIter;
-
-        /// Access the parent of a node
-        fn parent(&'a self, node: Self::Node) -> Option<Self::Node>;
-
-        /// Access the left sibling of a node
-        fn left(&'a self, node: Self::Node) -> Option<Self::Node>;
-
-        /// Access the right sibling of a node
-        fn right(&'a self, node: Self::Node) -> Option<Self::Node>;
-
-        /// Is this node a leaf?
-        fn is_leaf(&'a self, node: Self::Node) -> bool;
-
-        /// Access the leaf's ID
-        fn leaf_id(&'a self, node: Self::Node) -> Option<Self::Leaf>;
-
-        /// Access the leaf's label
-        fn label(&'a self, node: Self::Node) -> Option<&T>;
-
-        /// Access the node identified by a given leaf ID
-        fn leaf(&'a self, leaf: Self::Leaf) -> Self::Node;
-
-        /// Prune a leaf from the tree without removing it from the list of leaves
-        fn prune_leaf(&'a mut self, leaf: Self::Leaf);
-
-        /// Restore a pruned leaf by reattaching it to its parent
-        fn restore_leaf(&'a mut self, leaf: Self::Leaf);
-    }
-
-    /// A tree builder trait used by the Newick parser and other parts of the code to construct a
-    /// tree or forest.
-    pub trait TreeBuilder<T> {
-
-        /// The node type for the tree
-        type Node: Clone + Copy;
-
-        /// The tree type being constructed
-        type Tree;
-
-        /// Create a new tree builder
-        fn new() -> Self;
-
-        /// Allocate a new tree
-        fn new_tree(&mut self);
-
-        /// Create a new leaf in the current tree
-        fn new_leaf(&mut self, label: T) -> Self::Node;
-
-        /// Create a new internal node with the given set of children in the current tree.
-        fn new_node(&mut self, children: Vec<Self::Node>) -> Self::Node;
-
-        /// Finish the construction of this tree and make the given node its root.
-        fn finish_tree(&mut self, root: Self::Node);
-
-        /// Retrieve the constructed trees
-        fn trees(self) -> Vec<Self::Tree>;
-    }
-}
-
-
-use tree::traits::Id;
-use tree::traits::Tree as TreeTrait;
-
-
 /// A phylogenetic tree whose leaves have `usize` labels
 pub struct Tree<T> {
 
@@ -137,6 +21,14 @@ pub struct Tree<T> {
     /// Number of leaves in this tree
     leaf_count: usize,
 }
+
+
+/// A dictionary associating information with leaves
+pub struct LeafDict<T>(Vec<T>);
+
+
+/// A dictionary associating information with nodes
+pub struct NodeDict<T>(Vec<T>);
 
 
 /// A marker type that holds on to an element and marks it as alive or dead
@@ -249,43 +141,38 @@ impl<T> Removable<T> {
 }
 
 
-impl traits::Id for Node {
+impl Node {
 
-    fn new(id: usize) -> Self {
+    /// Create a new node from an integer ID
+    pub fn new(id: usize) -> Self {
         Node(id)
     }
 
-    fn id(self) -> usize {
+    /// Extract the underlying integer ID
+    pub fn id(self) -> usize {
         self.0
     }
 }
 
 
-impl traits::Id for Leaf {
+impl Leaf {
 
-    fn new(id: usize) -> Self {
+    /// Create a new leaf from an integer ID
+    pub fn new(id: usize) -> Self {
         Leaf(id)
     }
 
-    fn id(self) -> usize {
+    /// Extract the underlying integer ID
+    pub fn id(self) -> usize {
         self.0
     }
 }
 
 
-impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
+impl<T> Tree<T> {
 
-    type Node = Node;
-
-    type Leaf = Leaf;
-
-    type NodeIter = NodeIter<'a, T>;
-
-    type LeafIter = LeafIter<'a>;
-
-    type ChildIter = ChildIter<'a, T>;
-
-    fn new() -> Self {
+    /// Create a new empty tree
+    pub fn new() -> Self {
         Tree {
             nodes:      vec![],
             root:       None,
@@ -295,20 +182,23 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         }
     }
 
-    fn node_count(&self) -> usize {
+    /// Return the number of nodes in the tree
+    pub fn node_count(&self) -> usize {
         self.node_count
     }
 
-    fn leaf_count(&self) -> usize {
+    /// Return the number of leaves in the tree
+    pub fn leaf_count(&self) -> usize {
         self.leaf_count
     }
 
-    fn root(&self) -> Option<Node> {
+    /// Return the root of the tree
+    pub fn root(&self) -> Option<Node> {
         self.root
     }
 
-    // TODO: Iterate only over the nodes that are alive
-    fn nodes(&self) -> NodeIter<'a, T> {
+    /// Get an iterator over the nodes in the tree
+    pub fn nodes(&self) -> NodeIter<T> {
         NodeIter {
             tree: self,
             node: 0,
@@ -316,14 +206,15 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         }
     }
 
-    // TODO: Iterate only over the leaves that are alive
-    fn leaves(&'a self) -> LeafIter<'a> {
+    /// Get an iterator over the leaves in the tree
+    pub fn leaves(&self) -> LeafIter {
         LeafIter {
             iter: self.leaves.iter(),
         }
     }
 
-    fn children(&'a self, node: Node) -> ChildIter<'a, T> {
+    /// Get an iterator over the children of a node
+    pub fn children(&self, node: Node) -> ChildIter<T> {
         ChildIter {
             tree:  self,
             child: match self.node(node).data {
@@ -333,91 +224,181 @@ impl<'a, T: 'a> traits::Tree<'a, T> for Tree<T> {
         }
     }
 
-    fn parent(&self, node: Node) -> Option<Node> {
+    /// Get the parent of a node
+    pub fn parent(&self, node: Node) -> Option<Node> {
         self.node(node).parent
     }
 
-    fn left(&self, node: Node) -> Option<Node> {
+    /// Get the left sibling of a node
+    pub fn left(&self, node: Node) -> Option<Node> {
         self.node(node).left
     }
 
-    fn right(&self, node: Node) -> Option<Node> {
+    /// Get the right sibling of a node
+    pub fn right(&self, node: Node) -> Option<Node> {
         self.node(node).right
     }
 
-    fn is_leaf(&self, node: Node) -> bool {
+    /// Is this node a leaf?
+    pub fn is_leaf(&self, node: Node) -> bool {
         match self.node(node).data {
             TypedNodeData::Leaf(_, _) => true,
             _                         => false,
         }
     }
 
-    fn leaf_id(&self, node: Node) -> Option<Leaf> {
+    /// Get the leaf ID of this node
+    pub fn leaf_id(&self, node: Node) -> Option<Leaf> {
         match self.node(node).data {
             TypedNodeData::Leaf(id, _) => Some(id),
             _                          => None,
         }
     }
 
-    fn label(&self, node: Node) -> Option<&T> {
+    /// Get the label of this node, if it is a leaf
+    pub fn label(&self, node: Node) -> Option<&T> {
         match self.node(node).data {
             TypedNodeData::Leaf(_, ref label) => Some(label),
             _                                 => None,
         }
     }
 
-    fn leaf(&self, leaf: Leaf) -> Node {
+    /// Get the node ID of the given leaf
+    pub fn leaf(&self, leaf: Leaf) -> Node {
         *self.leaves[leaf.id()].as_ref().unwrap().item()
     }
 
-    fn prune_leaf(&mut self, leaf: Leaf) {
-        let node = self.leaf(leaf);
+    /// Prune the given leaf from the tree
+    pub fn prune_leaf(&mut self, leaf: Leaf) {
+        let node   = self.leaf(leaf);
+        let parent = self.parent(node);
+        let left   = self.left(node);
+        let right  = self.right(node);
+
+        if let Some(parent) = parent {
+            if let Some(left) = left {
+                self.nodes[left.id()].item_mut().right = right;
+            } else {
+                self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(right.unwrap());
+            }
+            if let Some(right) = right {
+                self.nodes[right.id()].item_mut().left = left;
+            }
+        } else {
+            self.root = None;
+        }
+
         self.leaves[leaf.id()].as_mut().unwrap().remove();
+        self.nodes[node.id()].remove();
         self.leaf_count -= 1;
-        match self.parent(node) {
-            Some(parent) => {
-                let left  = self.left(node);
-                let right = self.right(node);
-                match left {
-                    Some(left) => {
-                        self.nodes[left.id()].item_mut().right = right;
-                    },
-                    None => {
-                        self.nodes[parent.id()].item_mut().data =
-                            TypedNodeData::Internal(right.unwrap());
-                    },
-                }
-                if let Some(right) = right {
-                    self.nodes[right.id()].item_mut().left = left;
-                }
-            },
-            None => {
-                self.root = None;
-            },
-        }
+        self.node_count -= 1;
     }
 
-    fn restore_leaf(&mut self, leaf: Leaf) {
+    /// Reattach the given leaf to the tree.  It gets attached to the node that was the parent
+    /// before it was removed.
+    pub fn restore_leaf(&mut self, leaf: Leaf) {
         self.leaves[leaf.id()].as_mut().unwrap().restore();
-        self.leaf_count += 1;
         let node = self.leaf(leaf);
-        match self.parent(node) {
-            Some(parent) => {
-                if let TypedNodeData::Internal(right) = self.nodes[parent.id()].item().data {
-                    self.nodes[right.id()].item_mut().left = Some(node);
-                    self.nodes[node.id()].item_mut().right = Some(right);
-                    self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
-                }
+        self.nodes[node.id()].restore();
+        self.leaf_count += 1;
+        self.node_count += 1;
+
+        let parent = self.parent(node);
+        let left   = self.left(node);
+        let right  = self.right(node);
+
+        if let Some(parent) = parent {
+            if let Some(left) = left {
+                self.nodes[left.id()].item_mut().right = Some(node);
+            } else {
+                self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
+            }
+            if let Some(right) = right {
+                self.nodes[right.id()].item_mut().left = Some(node);
+            }
+        } else {
+            self.root = Some(node);
+        }
+    }
+
+    /// Suppress a node with only one child and return the child
+    pub fn suppress_node(&mut self, node: Node) -> Node {
+        let parent = self.parent(node);
+        let left   = self.left(node);
+        let right  = self.right(node);
+        let child  = match self.nodes[node.id()].item().data {
+
+            TypedNodeData::Leaf(_, _) => {
+                panic!("Cannot suppress leaf");
             },
-            None => {
-                self.root = Some(node);
+
+            TypedNodeData::Internal(child) => {
+                {
+                    let child_data = self.nodes[child.id()].item_mut();
+                    child_data.parent = parent;
+                    child_data.left   = left;
+                    child_data.right  = right;
+                }
+                if let Some(parent) = parent {
+                    if let Some(left) = left {
+                        self.nodes[left.id()].item_mut().right = Some(child);
+                    } else {
+                        self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(child);
+                    }
+                    if let Some(right) = right {
+                        self.nodes[right.id()].item_mut().left = Some(child);
+                    }
+                } else {
+                    self.root = Some(child);
+                }
+                child
+            },
+        };
+
+        self.node_count -= 1;
+        self.nodes[node.id()].remove();
+
+        child
+    }
+
+    /// Restore a node that was suppressed before
+    pub fn restore_node(&mut self, node: Node) {
+
+        self.node_count += 1;
+        self.nodes[node.id()].restore();
+
+        let parent = self.parent(node);
+        let left   = self.left(node);
+        let right  = self.right(node);
+
+        match self.nodes[node.id()].item().data {
+
+            TypedNodeData::Leaf(_, _) => {
+                panic!("Cannot restore leaf since it was not suppressed");
+            },
+
+            TypedNodeData::Internal(child) => {
+                {
+                    let child_data = self.nodes[child.id()].item_mut();
+                    child_data.parent = Some(node);
+                    child_data.left   = None;
+                    child_data.right  = None;
+                }
+                if let Some(parent) = parent {
+                    if let Some(left) = left {
+                        self.nodes[left.id()].item_mut().right = Some(node);
+                    } else {
+                        self.nodes[parent.id()].item_mut().data = TypedNodeData::Internal(node);
+                    }
+                    if let Some(right) = right {
+                        self.nodes[right.id()].item_mut().left = Some(node);
+                    }
+                } else {
+                    self.root = Some(node);
+                }
             },
         }
     }
-}
-
-
-impl<T> Tree<T> {
 
     /// Access the node data for the given node
     fn node(&self, node: Node) -> &NodeData<T> {
@@ -494,14 +475,11 @@ pub struct TreeBuilder<T> {
 }
 
 
-impl<T> traits::TreeBuilder<T> for TreeBuilder<T>
+impl<T> TreeBuilder<T>
 where T: Clone + Eq + Hash {
 
-    type Node = Node;
-
-    type Tree = Tree<T>;
-
-    fn new() -> Self {
+    /// Create a new tree builder
+    pub fn new() -> Self {
         TreeBuilder {
             current_tree: None,
             trees:        vec![],
@@ -509,11 +487,13 @@ where T: Clone + Eq + Hash {
         }
     }
 
-    fn new_tree(&mut self) {
+    /// Create a new tree and make it the active tree
+    pub fn new_tree(&mut self) {
         self.current_tree = Some(Tree::new());
     }
 
-    fn new_leaf(&mut self, label: T) -> Node {
+    /// Create a new leaf in the active tree
+    pub fn new_leaf(&mut self, label: T) -> Node {
 
         let leaf_id = self.leaf_ids.len();
         let leaf    = self.leaf_ids.entry(label.clone()).or_insert(Leaf::new(leaf_id));
@@ -536,7 +516,8 @@ where T: Clone + Eq + Hash {
         }).unwrap()
     }
 
-    fn new_node(&mut self, children: Vec<Node>) -> Node {
+    /// Create a new node with the given list of children in the active tree
+    pub fn new_node(&mut self, children: Vec<Node>) -> Node {
         self.current_tree.as_mut().map(|t| {
             let node = Node(t.nodes.len());
             t.nodes.push(Removable::new(NodeData {
@@ -559,12 +540,15 @@ where T: Clone + Eq + Hash {
         }).unwrap()
     }
 
-    fn finish_tree(&mut self, root: Node) {
+    /// Make the given node the root of the active tree and add the tree to the list of finished
+    /// trees.  No tree is active aftewards.
+    pub fn finish_tree(&mut self, root: Node) {
         self.current_tree.as_mut().map(|t| t.root = Some(root));
         self.trees.push(self.current_tree.take().unwrap());
     }
 
-    fn trees(self) -> Vec<Self::Tree> {
+    /// Extract the list of built trees
+    pub fn trees(self) -> Vec<Tree<T>> {
         self.trees
     }
 }
@@ -573,7 +557,6 @@ where T: Clone + Eq + Hash {
 mod tests {
 
     use super::*;
-    use super::traits::TreeBuilder as TreeBuilderTrait;
 
     /// Test that leaf IDs convert correctly
     #[test]
@@ -599,6 +582,7 @@ mod tests {
         let tree: Tree<u32> = Tree::new();
         assert_eq!(tree.root(), None);
         assert_eq!(tree.node_count(), 0);
+        assert_eq!(tree.leaf_count(), 0);
         assert_eq!(tree.nodes().next(), None);
         assert_eq!(tree.leaves().next(), None);
     }
@@ -645,6 +629,8 @@ mod tests {
         assert_eq!(trees.len(), 2);
         assert_eq!(trees[0].node_count(), 9);
         assert_eq!(trees[1].node_count(), 8);
+        assert_eq!(trees[0].leaf_count(), 6);
+        assert_eq!(trees[1].leaf_count(), 5);
         assert_eq!(trees[0].root(), Some(Node::new(8)));
         assert_eq!(trees[1].root(), Some(Node::new(7)));
     }
@@ -788,5 +774,128 @@ mod tests {
             assert_eq!(trees[1].left(node), left);
             assert_eq!(trees[1].right(node), right);
         }
+    }
+
+    /// Test that remove_leaf and restore_leaf interact with each other nicely
+    #[test]
+    fn tree_remove_restore_leaf() {
+        let mut trees = build_tree();
+        let leaf1   = Leaf::new(3);
+        let leaf2   = Leaf::new(1);
+        let parent1 = Node::new(4);
+        let parent2 = Node::new(6);
+
+        trees[0].prune_leaf(leaf1);
+        assert_eq!(trees[0].leaf_count(), 5);
+        assert_eq!(trees[0].node_count(), 8);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
+
+        trees[0].prune_leaf(leaf2);
+        assert_eq!(trees[0].leaf_count(), 4);
+        assert_eq!(trees[0].node_count(), 7);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
+        assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5)]);
+
+        trees[0].restore_leaf(leaf2);
+        assert_eq!(trees[0].leaf_count(), 5);
+        assert_eq!(trees[0].node_count(), 8);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
+        assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5), Node(1)]);
+
+        trees[0].restore_leaf(leaf1);
+        assert_eq!(trees[0].leaf_count(), 6);
+        assert_eq!(trees[0].node_count(), 9);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(3), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(3), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(3)]);
+        assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5), Node(1)]);
+
+        trees[0].prune_leaf(leaf1);
+        assert_eq!(trees[0].leaf_count(), 5);
+        assert_eq!(trees[0].node_count(), 8);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
+
+        trees[0].prune_leaf(leaf2);
+        assert_eq!(trees[0].leaf_count(), 4);
+        assert_eq!(trees[0].node_count(), 7);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
+        assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5)]);
+    }
+
+    /// Check that suppressing and restoring nodes does the right thing
+    #[test]
+    fn tree_suppress_restore_node() {
+        let mut trees = build_tree();
+        let leaf1   = Leaf::new(0);
+        let leaf2   = Leaf::new(3);
+        let leaf3   = Leaf::new(4);
+        let node1   = Node::new(4);
+        let node2   = Node::new(6);
+        let parent  = Node::new(8);
+        trees[0].prune_leaf(leaf1);
+        trees[0].prune_leaf(leaf2);
+        trees[0].prune_leaf(leaf3);
+        assert_eq!(trees[0].leaf_count(), 3);
+        assert_eq!(trees[0].node_count(), 6);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(4), Node::new(6), Node::new(7), Node::new(8)]);
+
+        trees[0].suppress_node(node1);
+        assert_eq!(trees[0].leaf_count(), 3);
+        assert_eq!(trees[0].node_count(), 5);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(6), Node::new(7), Node::new(8)]);
+        assert_eq!(trees[0].children(parent).collect::<Vec<Node>>(),
+        vec![Node::new(2), Node::new(6), Node::new(7)]);
+
+        trees[0].suppress_node(node2);
+        assert_eq!(trees[0].leaf_count(), 3);
+        assert_eq!(trees[0].node_count(), 4);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7), Node::new(8)]);
+        assert_eq!(trees[0].children(parent).collect::<Vec<Node>>(),
+        vec![Node::new(2), Node::new(1), Node::new(7)]);
+
+        trees[0].restore_node(node2);
+        assert_eq!(trees[0].leaf_count(), 3);
+        assert_eq!(trees[0].node_count(), 5);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(6), Node::new(7), Node::new(8)]);
+        assert_eq!(trees[0].children(parent).collect::<Vec<Node>>(),
+        vec![Node::new(2), Node::new(6), Node::new(7)]);
+
+        trees[0].restore_node(node1);
+        assert_eq!(trees[0].leaf_count(), 3);
+        assert_eq!(trees[0].node_count(), 6);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(7)]);
+        assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
+        vec![Node::new(1), Node::new(2), Node::new(4), Node::new(6), Node::new(7), Node::new(8)]);
+        assert_eq!(trees[0].children(parent).collect::<Vec<Node>>(),
+        vec![Node::new(4), Node::new(6), Node::new(7)]);
     }
 }
