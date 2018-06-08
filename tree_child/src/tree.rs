@@ -272,7 +272,7 @@ impl<T> Tree<T> {
 
         self.leaves[leaf.id()].as_mut().unwrap().restore();
         let node = self.leaf(leaf);
-self.nodes[node.id()].restore();
+        self.nodes[node.id()].restore();
         self.leaf_count += 1;
         self.node_count += 1;
 
@@ -286,14 +286,10 @@ self.nodes[node.id()].restore();
     /// Suppress a node with only one child and return the child
     pub fn suppress_node(&mut self, node: Node) -> Node {
 
-        let child = if let TypedNodeData::Internal(ref children) = self.node(node).data {
-            children[0]
-        } else {
-            panic!("Cannot suppress leaf!");
-        };
+        let child = self.internal_children(node)[0];
 
         let parent = self.parent(node);
-        self.nodes[child.id()].item_mut().parent = parent;
+        self.node_mut(child).parent = parent;
         if let Some(parent) = parent {
             self.replace_child(parent, node, child);
         } else {
@@ -312,13 +308,9 @@ self.nodes[node.id()].restore();
         self.node_count += 1;
         self.nodes[node.id()].restore();
 
-        let child = if let TypedNodeData::Internal(ref children) = self.node(node).data {
-            children[0]
-        } else {
-            panic!("Cannot restore leaf since it was not suppressed");
-        };
+        let child = self.internal_children(node)[0];
 
-        self.nodes[child.id()].item_mut().parent = Some(node);
+        self.node_mut(child).parent = Some(node);
         if let Some(parent) = self.parent(node) {
             self.replace_child(parent, child, node);
         } else {
@@ -328,38 +320,29 @@ self.nodes[node.id()].restore();
 
     /// Add a child to a given node
     fn add_child(&mut self, parent: Node, child: Node) {
-        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
-            children.push(child);
-        } else {
-            panic!("Cannot add a child to a leaf!");
-        }
+        let children = self.internal_children_mut(parent);
+        children.push(child);
     }
 
     /// Remove a child from a given node
     fn remove_child(&mut self, parent: Node, child: Node) {
-        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
-            match children.iter().position(|&c| c == child) {
-                Some(pos) => { children.swap_remove(pos); },
-                None      => panic!("Cannot remove nonexistent child!"),
-            }
-        } else {
-            panic!("Cannot remove a child from a leaf!");
+        let children = self.internal_children_mut(parent);
+        match children.iter().position(|&c| c == child) {
+            Some(pos) => { children.swap_remove(pos); },
+            None      => panic!("Cannot remove nonexistent child!"),
         }
     }
 
     /// Rplace a child with a different child
     fn replace_child(&mut self, parent: Node, old_child: Node, new_child: Node) {
-        if let TypedNodeData::Internal(ref mut children) = self.node_mut(parent).data {
-            for child in children.iter_mut() {
-                if *child == old_child {
-                    *child = new_child;
-                    return;
-                }
+        let children = self.internal_children_mut(parent);
+        for child in children.iter_mut() {
+            if *child == old_child {
+                *child = new_child;
+                return;
             }
-            panic!("Cannot replace non-existent child!");
-        } else {
-            panic!("Cannot replace children of a leaf!");
         }
+        panic!("Cannot replace non-existent child!");
     }
 
     /// Access the node data for the given node
@@ -370,6 +353,22 @@ self.nodes[node.id()].restore();
     /// Access the node data mutably
     fn node_mut(&mut self, node: Node) -> &mut NodeData<T> {
         self.nodes[node.id()].item_mut()
+    }
+
+    /// Access the list of children of an internal node
+    fn internal_children(&self, node: Node) -> &Vec<Node> {
+        match self.node(node).data {
+            TypedNodeData::Internal(ref children) => children,
+            _ => panic!("Trying to access the children of a leaf!"),
+        }
+    }
+
+    /// Mutably access the list of children of an internal node
+    fn internal_children_mut(&mut self, node: Node) -> &mut Vec<Node> {
+        match self.node_mut(node).data {
+            TypedNodeData::Internal(ref mut children) => children,
+            _ => panic!("Trying to access the children of a leaf!"),
+        }
     }
 }
 
