@@ -146,7 +146,7 @@ impl<'t, T: 't> LcaMapper<'t, T> {
            t2: &'t (&'t Tree<T>, Vec<(usize, usize)>)) -> Self {
 
         // Set up the initial mapping between matching leaves
-        let mut mapping = vec![Node::new(0); t1.0.node_count()];
+        let mut mapping = vec![Default::default(); t1.0.node_count()];
         for leaf in t1.0.leaves() {
             mapping[leaf.id()] = t2.0.leaf(t1.0.leaf_id(leaf).unwrap());
         }
@@ -174,7 +174,7 @@ impl<'t, T: 't> LcaMapper<'t, T> {
 
             // Get the first candidate image as the image computed for the first child
             let mut children = self.tree.children(node);
-            let first_buddy = self.traverse(children.next().unwrap());
+            let first_buddy  = self.traverse(children.next().unwrap());
 
             // Move the image up the tree to encompass the images of all the other children
             let mut buddy = first_buddy;
@@ -219,22 +219,28 @@ fn identify_clusters<T>(tree:          &Tree<T>,
     for m in backward_maps.iter() {
         cluster_nodes.push(vec![None; m.len()]);
     }
+
     let mut cluster_id = 0;
     'l: for node in 0..forward_maps[0].len() {
+
         if tree.is_leaf(Node::new(node)) {
             continue 'l
         }
+
         for t in 0..forward_maps.len() {
             if backward_maps[t][forward_maps[t][node].id()].id() != node {
                 continue 'l
             }
         }
+
         cluster_nodes[0][node] = Some(cluster_id);
         for t in 0..forward_maps.len() {
             cluster_nodes[t+1][forward_maps[t][node].id()] = Some(cluster_id);
         }
+
         cluster_id += 1;
     }
+
     (cluster_id, cluster_nodes)
 }
 

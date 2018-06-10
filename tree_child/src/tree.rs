@@ -251,10 +251,11 @@ impl<T> Tree<T> {
     }
 
     /// Prune the given leaf from the tree
-    pub fn prune_leaf(&mut self, leaf: Leaf) {
+    pub fn prune_leaf(&mut self, leaf: Leaf) -> Option<Node> {
         let node   = self.leaf(leaf);
+        let parent = self.parent(node);
 
-        if let Some(parent) = self.parent(node) {
+        if let Some(parent) = parent {
             self.remove_child(parent, node);
         } else {
             self.root = None;
@@ -264,6 +265,8 @@ impl<T> Tree<T> {
         self.nodes[node.id()].remove();
         self.leaf_count -= 1;
         self.node_count -= 1;
+
+        parent
     }
 
     /// Reattach the given leaf to the tree.  It gets attached to the node that was the parent
