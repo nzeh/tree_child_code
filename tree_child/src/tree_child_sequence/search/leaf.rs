@@ -1,3 +1,4 @@
+use std::slice;
 use super::cherry;
 
 /// The data associated with a leaf
@@ -33,6 +34,11 @@ impl Leaf {
         self.cherries[ix]
     }
 
+    /// Provide a mutable reference to the ixt cherry in this leaf's cherry list
+    pub fn cherry_mut(&mut self, ix: usize) -> &mut cherry::Ref {
+        &mut self.cherries[ix]
+    }
+
     /// Add a new cherry
     pub fn add_cherry(&mut self, cherry_ref: cherry::Ref) {
         self.cherries.push(cherry_ref)
@@ -46,5 +52,10 @@ impl Leaf {
     /// Update the reference when a cherry was moved
     pub fn replace_cherry(&mut self, ix: usize, cherry_ref: cherry::Ref) {
         self.cherries[ix] = cherry_ref;
+    }
+
+    /// Iterator over the cherries this leaf participates in
+    pub fn cherries(&self) -> slice::Iter<cherry::Ref> {
+        self.cherries.iter()
     }
 }

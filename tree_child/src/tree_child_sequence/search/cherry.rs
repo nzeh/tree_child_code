@@ -31,6 +31,16 @@ pub enum Ref {
 
 impl Cherry {
 
+    /// Create a new cherry first found in `tree`
+    pub fn new(u: Leaf, v: Leaf, tree: usize) -> Cherry {
+        Cherry { u, v, uix: 0, vix: 0, trees: vec![tree] }
+    }
+
+    /// Push a new tree to the list of trees that have this cherry
+    pub fn push_tree(&mut self, tree: usize) {
+        self.trees.push(tree);
+    }
+
     /// Remove the final tree this cherry occurs in
     pub fn pop_tree(&mut self) {
         self.trees.pop();

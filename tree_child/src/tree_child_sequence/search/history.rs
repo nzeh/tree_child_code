@@ -35,10 +35,10 @@ impl History {
 pub enum Op {
 
     /// Add a cherry to the list of trivial cherries
-    AddTrivialCherry,
+    PushTrivialCherry,
 
     /// Add a cherry to the list of non-trivial cherries
-    AddNonTrivialCherry,
+    PushNonTrivialCherry,
 
     /// Remove a cherry from the end of the list of trivial cherries
     PopTrivialCherry(cherry::Cherry),
