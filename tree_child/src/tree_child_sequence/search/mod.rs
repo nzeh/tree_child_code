@@ -4,7 +4,7 @@ mod history;
 mod state;
 
 use tree::{Tree, Leaf, Node};
-use self::history::{History, Op};
+use self::history::{History, Op, Snapshot};
 use self::state::State;
 
 /// The state of the search for a tree-child sequence
@@ -47,8 +47,61 @@ impl<T> Search<T> {
 
     /// Recursively search for a tree-child sequence
     fn recurse(&mut self) -> bool {
-        // TODO: Take care of the non-trivial cherries
-        false
+        if let Some(leaf) = self.state.final_leaf() {
+            // If there is only one leaf left, we have found a tree-child sequence and report
+            // success after pushing the final pair to the tree-child sequence.
+            self.state.push_final_tree_child_pair(leaf);
+            true
+        } else {
+            // If there is more than one leaf left, we need to try to resolve non-trivial cherries
+            // and recursively continue the search.
+
+            if self.state.weight() < self.state.max_weight() {
+                // If we haven't reached the maximum weight of an acceptable tree-child sequence in
+                // the current search, try branching.
+
+                if self.state.num_non_trivial_cherries() > 4*self.state.max_weight() {
+                    // If there are more than 4*max_weight cherries to branch on, then the
+                    // tree-child hybridization number is greater than max_weight, abort.
+                    false
+                } else {
+                    // Otherwise, branch.
+                    let snapshot = self.history.take_snapshot();
+                    for index in 0..self.state.num_non_trivial_cherries() {
+                        let cherry = self.remove_cherry(cherry::Ref::NonTrivial(index));
+                        let (u, v) = cherry.leaves();
+                        if self.state.leaf(v).num_occurrences() == self.state.num_trees() {
+                            self.increase_weight();
+                            self.push_tree_child_pair(u, v);
+                            for tree in cherry.trees() {
+                                self.prune_leaf(u, *tree);
+                            }
+                            if self.recurse() {
+                                return true;
+                            }
+                            self.rewind_to_snapshot(snapshot);
+                        }
+                        if self.state.leaf(u).num_occurrences() == self.state.num_trees() {
+                            self.increase_weight();
+                            self.push_tree_child_pair(v, u);
+                            for tree in cherry.trees() {
+                                self.prune_leaf(v, *tree);
+                            }
+                            if self.recurse() {
+                                return true;
+                            }
+                            self.rewind_to_snapshot(snapshot);
+                        }
+                    }
+                    false
+                }
+
+            } else {
+                // If we have reached the maximum weight of an acceptable tree-child sequence in
+                // the current search, report failure in this branch
+                false
+            }
+        }
     }
 
     /// Eliminate all trivial cherries in the current search state.
@@ -72,6 +125,23 @@ impl<T> Search<T> {
             // Prune u from every tree that has the cherry (u, v)
             for tree in cherry.trees() {
                 self.prune_leaf(u, *tree);
+            }
+        }
+    }
+
+    /// Rewind to a snapshot
+    fn rewind_to_snapshot(&mut self, snapshot: Snapshot) {
+        for op in self.history.rewind(snapshot) {
+            match op {
+                Op::PushTrivialCherry                     => self.undo_push_trivial_cherry(),
+                Op::PopTrivialCherry(cherry)              => self.undo_pop_trivial_cherry(cherry),
+                Op::RemoveTrivialCherry(index, cherry)    => self.undo_remove_trivial_cherry(index, cherry),
+                Op::RemoveNonTrivialCherry(index, cherry) => self.undo_remove_non_trivial_cherry(index, cherry),
+                Op::RecordCherry(cherry_ref)              => self.undo_record_cherry(cherry_ref),
+                Op::PruneLeaf(leaf, tree)                 => self.undo_prune_leaf(leaf, tree),
+                Op::SuppressNode(node, tree)              => self.undo_suppress_node(node, tree),
+                Op::PushTreeChildPair                     => self.undo_push_tree_child_pair(),
+                Op::IncreaseWeight                        => self.undo_increase_weight(),
             }
         }
     }
@@ -102,17 +172,6 @@ impl<T> Search<T> {
         self.state.pop_trivial_cherry();
     }
 
-    /// Push a cherry to the end of the list of non-trivial cherries
-    fn push_non_trivial_cherry(&mut self, cherry: cherry::Cherry) {
-        self.history.record_op(Op::PushNonTrivialCherry);
-        self.state.push_non_trivial_cherry(cherry);
-    }
-
-    /// Undo pushing a non-trivial cherry
-    fn undo_push_non_trivial_cherry(&mut self) {
-        self.state.pop_non_trivial_cherry();
-    }
-
     /// Pop the last cherry from the list of trivial cherries
     fn pop_trivial_cherry(&mut self) -> Option<cherry::Cherry> {
         self.state.pop_trivial_cherry().map(|cherry| {
@@ -124,19 +183,6 @@ impl<T> Search<T> {
     /// Undo popping a trivial cherry
     fn undo_pop_trivial_cherry(&mut self, cherry: cherry::Cherry) {
         self.state.push_trivial_cherry(cherry);
-    }
-
-    /// Pop the last cherry from the list of non-trivial cherries
-    fn pop_non_trivial_cherry(&mut self) -> Option<cherry::Cherry> {
-        self.state.pop_non_trivial_cherry().map(|cherry| {
-            self.history.record_op(Op::PopNonTrivialCherry(cherry.clone()));
-            cherry
-        })
-    }
-
-    /// Undo popping a non-trivial cherry
-    fn undo_pop_non_trivial_cherry(&mut self, cherry: cherry::Cherry) {
-        self.state.push_non_trivial_cherry(cherry);
     }
 
     /// Remove a cherry indexed by the given cherry reference
@@ -216,12 +262,23 @@ impl<T> Search<T> {
 
     /// Add a cherry to the cherry picking sequence
     fn push_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
-        self.history.record_op(Op::RecordTreeChildPair);
+        self.history.record_op(Op::PushTreeChildPair);
         self.state.push_tree_child_pair(u, v);
     }
 
     /// Undo the recording of a cherry
     fn undo_push_tree_child_pair(&mut self) {
         self.state.pop_tree_child_pair();
+    }
+
+    /// Increase the weight of the current sequence
+    fn increase_weight(&mut self) {
+        self.history.record_op(Op::IncreaseWeight);
+        self.state.increase_weight();
+    }
+
+    /// Undo a weight increase
+    fn undo_increase_weight(&mut self) {
+        self.state.decrease_weight();
     }
 }

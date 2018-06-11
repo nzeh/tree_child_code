@@ -27,6 +27,11 @@ impl History {
         }
         ops.into_iter()
     }
+
+    /// Take a snapshot of the current history state
+    pub fn take_snapshot(&self) -> Snapshot {
+        Snapshot(self.0.len())
+    }
 }
 
 
@@ -37,14 +42,8 @@ pub enum Op {
     /// Add a cherry to the list of trivial cherries
     PushTrivialCherry,
 
-    /// Add a cherry to the list of non-trivial cherries
-    PushNonTrivialCherry,
-
     /// Remove a cherry from the end of the list of trivial cherries
     PopTrivialCherry(cherry::Cherry),
-
-    /// Remove a cherry from the end of the list of non-trivial cherries
-    PopNonTrivialCherry(cherry::Cherry),
 
     /// Remove a cherry from the list of trivial cherries
     RemoveTrivialCherry(usize, cherry::Cherry),
@@ -62,9 +61,13 @@ pub enum Op {
     SuppressNode(Node, usize),
 
     /// Add a cherry to the tree-child sequence
-    RecordTreeChildPair,
+    PushTreeChildPair,
+
+    /// Increase the recorded weight of the current tree-child sequence
+    IncreaseWeight,
 }
 
 
 /// A snapshot of the current search state
+#[derive(Clone, Copy)]
 pub struct Snapshot(usize);

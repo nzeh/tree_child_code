@@ -10,6 +10,9 @@ pub struct State<T> {
     /// The trees for which to find a TC sequence
     trees: Vec<Tree<T>>,
 
+    /// The number of leaves that have not been pruned from all trees yet
+    num_leaves: usize,
+
     /// The information associated with the leaves during the search
     leaves: Vec<leaf::Leaf>,
 
@@ -41,10 +44,12 @@ impl<T> State<T> {
     /// Create a new search state
     pub fn new(trees: Vec<Tree<T>>) -> Self {
 
-        let leaves = vec![leaf::Leaf::new(trees.len()); trees[0].leaf_count()];
+        let num_leaves = trees[0].leaf_count();
+        let leaves     = vec![leaf::Leaf::new(trees.len()); num_leaves];
 
         let mut state = State {
             trees,
+            num_leaves,
             leaves,
             trivial_cherries:     vec![],
             non_trivial_cherries: vec![],
@@ -209,17 +214,6 @@ impl<T> State<T> {
         })
     }
 
-    /// Pop a non-trivial cherry
-    pub fn pop_non_trivial_cherry(&mut self) -> Option<cherry::Cherry> {
-        self.non_trivial_cherries.pop().map(|cherry| {
-            let (u, v)     = cherry.leaves();
-            let (uix, vix) = cherry.indices();
-            self.remove_cherry_ref(u, uix);
-            self.remove_cherry_ref(v, vix);
-            cherry
-        })
-    }
-
     /// Remove a cherry
     pub fn remove_cherry(&mut self, cherry_ref: cherry::Ref) -> cherry::Cherry {
 
@@ -337,12 +331,20 @@ impl<T> State<T> {
 
     /// Prune a leaf from a tree
     pub fn prune_leaf(&mut self, leaf: Leaf, tree: usize) -> Option<Node> {
+        self.leaf_mut(leaf).decrease_num_occurrences();
+        if self.leaf(leaf).num_occurrences() == 0 {
+            self.num_leaves -= 1;
+        }
         self.tree_mut(tree).prune_leaf(leaf)
     }
 
     /// Restore a leaf that was previously pruned
     pub fn restore_leaf(&mut self, leaf: Leaf, tree: usize) {
-        self.tree_mut(tree).restore_leaf(leaf)
+        if self.leaf(leaf).num_occurrences() == 0 {
+            self.num_leaves += 1;
+        }
+        self.leaf_mut(leaf).increase_num_occurrences();
+        self.tree_mut(tree).restore_leaf(leaf);
     }
 
     /// Suppress an internal node
@@ -362,6 +364,11 @@ impl<T> State<T> {
     /// Push a new pair to the end of the tree-child sequence
     pub fn push_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.tc_seq.push(super::super::Pair::Reduce(u, v));
+    }
+
+    /// Push the final pair in the tree-child sequence
+    pub fn push_final_tree_child_pair(&mut self, leaf: Leaf) {
+        self.tc_seq.push(super::super::Pair::Final(leaf));
     }
 
     /// Remove the last pair form the tree-child sequence
@@ -418,8 +425,45 @@ impl<T> State<T> {
     // Basic stats
     //----------------------------------------------------------------------------------------------
 
+    /// The final leaf that is still alive if there is only one, otherwise None.
+    pub fn final_leaf(&self) -> Option<Leaf> {
+        if self.num_leaves == 1 {
+            for (i, leaf) in self.leaves.iter().enumerate() {
+                if leaf.num_occurrences() == 1 {
+                    return Some(Leaf::new(i));
+                }
+            }
+        }
+        None
+    }
+
     /// The number of trees
     pub fn num_trees(&self) -> usize {
         self.trees.len()
+    }
+
+    /// The number of non-trivial cherries
+    pub fn num_non_trivial_cherries(&self) -> usize {
+        self.non_trivial_cherries.len()
+    }
+
+    /// Increase the weight of the current sequence
+    pub fn increase_weight(&mut self) {
+        self.weight += 1;
+    }
+
+    /// Decrease the weight of the current sequence
+    pub fn decrease_weight(&mut self) {
+        self.weight -= 1;
+    }
+
+    /// The weight of the sequence so far (the number of non-trivial cherries resolve)
+    pub fn weight(&self) -> usize {
+        self.weight
+    }
+
+    /// The maximum weight of the sequence in the current search
+    pub fn max_weight(&self) -> usize {
+        self.max_weight
     }
 }

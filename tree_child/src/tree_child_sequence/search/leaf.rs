@@ -19,6 +19,16 @@ impl Leaf {
         Leaf { num_occurrences, cherries: vec![] }
     }
 
+    /// Increase the number of occurrences of this leaf
+    pub fn increase_num_occurrences(&mut self) {
+        self.num_occurrences += 1;
+    }
+
+    /// Decrease the number of occurrences of this leaf
+    pub fn decrease_num_occurrences(&mut self) {
+        self.num_occurrences -= 1;
+    }
+
     /// The number of occurrences of this leaf
     pub fn num_occurrences(&self) -> usize {
         self.num_occurrences
