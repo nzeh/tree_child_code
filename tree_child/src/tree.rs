@@ -23,14 +23,6 @@ pub struct Tree<T> {
 }
 
 
-/// A dictionary associating information with leaves
-pub struct LeafDict<T>(Vec<T>);
-
-
-/// A dictionary associating information with nodes
-pub struct NodeDict<T>(Vec<T>);
-
-
 /// A marker type that holds on to an element and marks it as alive or dead
 struct Removable<T> {
     
