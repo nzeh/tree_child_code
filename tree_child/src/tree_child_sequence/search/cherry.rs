@@ -3,6 +3,7 @@ use std::slice;
 use tree::Leaf;
 
 /// The data associated with a cherry
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone)]
 pub struct Cherry {
 
@@ -23,6 +24,7 @@ pub struct Cherry {
 }
 
 /// Reference to a cherry
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone, Copy)]
 pub enum Ref {
     Trivial(usize),

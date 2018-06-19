@@ -36,6 +36,7 @@ impl History {
 
 
 /// The operations we perform
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone)]
 pub enum Op {
 
@@ -69,5 +70,40 @@ pub enum Op {
 
 
 /// A snapshot of the current search state
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone, Copy)]
 pub struct Snapshot(usize);
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    /// Test history operations
+    #[test]
+    fn test_history() {
+        let mut history = History::new();
+        assert!(history.0.is_empty());
+        history.record_op(Op::PushTrivialCherry);
+        history.record_op(Op::PushTreeChildPair);
+        let snapshot1 = history.take_snapshot();
+        assert_eq!(snapshot1.0, 2);
+        history.record_op(Op::IncreaseWeight);
+        history.record_op(Op::PushTrivialCherry);
+        let snapshot2 = history.take_snapshot();
+        assert_eq!(history.0, vec![Op::PushTrivialCherry, Op::PushTreeChildPair,
+                   Op::IncreaseWeight, Op::PushTrivialCherry]);
+        assert_eq!(snapshot2.0, 4);
+        history.record_op(Op::PushTrivialCherry);
+        assert_eq!(history.0, vec![Op::PushTrivialCherry, Op::PushTreeChildPair,
+                   Op::IncreaseWeight, Op::PushTrivialCherry, Op::PushTrivialCherry]);
+        let undo2 = history.rewind(snapshot2).collect::<Vec<Op>>();
+        assert_eq!(history.0, vec![Op::PushTrivialCherry, Op::PushTreeChildPair,
+                   Op::IncreaseWeight, Op::PushTrivialCherry]);
+        assert_eq!(undo2, vec![Op::PushTrivialCherry]);
+        let undo1 = history.rewind(snapshot1).collect::<Vec<Op>>();
+        assert_eq!(history.0, vec![Op::PushTrivialCherry, Op::PushTreeChildPair]);
+        assert_eq!(undo1, vec![Op::PushTrivialCherry, Op::IncreaseWeight]);
+    }
+}
