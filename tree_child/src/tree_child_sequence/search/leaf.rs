@@ -2,6 +2,7 @@ use std::slice;
 use super::cherry;
 
 /// The data associated with a leaf
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone)]
 pub struct Leaf {
 

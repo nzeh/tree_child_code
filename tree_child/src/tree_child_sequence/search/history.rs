@@ -82,7 +82,7 @@ mod tests {
 
     /// Test history operations
     #[test]
-    fn test_history() {
+    fn history() {
         let mut history = History::new();
         assert!(history.0.is_empty());
         history.record_op(Op::PushTrivialCherry);
