@@ -1,4 +1,4 @@
-use tree::{Tree, Leaf};
+use tree::Tree;
 
 mod search;
 
@@ -29,12 +29,12 @@ mod test_support {
     use std::fmt;
     use super::Pair;
 
-    impl fmt::Display for Pair {
+    impl<T: fmt::Display> fmt::Display for Pair<T> {
 
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
-                Pair::Reduce(u, v) => write!(f, "({}, {})", u.id(), v.id()),
-                Pair::Final(u)     => write!(f, "({}, -)", u.id()),
+                Pair::Reduce(u, v) => write!(f, "({}, {})", u, v),
+                Pair::Final(u)     => write!(f, "({}, -)", u),
             }
         }
     }

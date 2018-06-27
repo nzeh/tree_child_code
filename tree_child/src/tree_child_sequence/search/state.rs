@@ -1735,12 +1735,12 @@ pub mod tests {
         assert_eq!(state.tc_seq, vec![Pair::Reduce(Leaf::new(3), Leaf::new(4))]);
         state.push_tree_child_pair(Leaf::new(6), Leaf::new(5));
         state.push_tree_child_pair(Leaf::new(6), Leaf::new(7));
-        state.push_final_tree_child_pair(Leaf::new(8));
+        state.push_final_tree_child_pair(Leaf::new(0));
         assert_eq!(state.tc_seq(), vec![
-                   Pair::Reduce(Leaf::new(3), Leaf::new(4)),
-                   Pair::Reduce(Leaf::new(6), Leaf::new(5)),
-                   Pair::Reduce(Leaf::new(6), Leaf::new(7)),
-                   Pair::Final(Leaf::new(8))]);
+                   Pair::Reduce(String::from("b"), String::from("f")),
+                   Pair::Reduce(String::from("e"), String::from("g")),
+                   Pair::Reduce(String::from("e"), String::from("h")),
+                   Pair::Final(String::from("a"))]);
     }
 
     /// Test that we report the final leaf correctly (None if there is more than one leaf,
@@ -1771,7 +1771,7 @@ pub mod tests {
     }
 
     /// Non-destructively access the constructed tree-child sequence
-    pub fn tc_seq<T>(state: &State<T>) -> &TcSeq {
+    pub fn tc_seq<T>(state: &State<T>) -> &TcSeq<Leaf> {
         &state.tc_seq
     }
 

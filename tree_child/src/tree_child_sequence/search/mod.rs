@@ -6,7 +6,7 @@ mod state;
 use tree::{Tree, Leaf, Node};
 use self::history::{History, Op, Snapshot};
 use self::state::State;
-use super::{Pair, TcSeq};
+use super::TcSeq;
 
 /// The state of the search for a tree-child sequence
 pub struct Search<T> {
@@ -296,6 +296,7 @@ mod tests {
     use newick;
     use tree::TreeBuilder;
     use super::*;
+    use super::super::Pair;
 
     /// Test that the initial search state is initialized correctly
     #[test]
@@ -1156,7 +1157,7 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(3, 4), (2, 4), (0, 1), (1, 4), (4, -)>");
+        assert_eq!(string, "<(c, e), (b, e), (a, g), (g, e), (e, -)>");
     }
 
     /// Test unsuccessful recurse with parameter 0
@@ -1198,7 +1199,7 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(0, 1), (1, 2), (0, 2), (2, -)>");
+        assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
     }
 
     /// Test unsuccessful recurse with parameter 1
@@ -1242,7 +1243,7 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(3, 4), (3, 2), (1, 2), (1, 0), (2, 4), (0, 4), (4, -)>");
+        assert_eq!(string, "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>");
     }
 
     /// Test run
@@ -1269,6 +1270,6 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(3, 4), (3, 2), (1, 2), (1, 0), (2, 4), (0, 4), (4, -)>");
+        assert_eq!(string, "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>");
     }
 }
