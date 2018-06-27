@@ -244,7 +244,7 @@ impl<'b, 'i> Parser<'b, 'i> {
 
 
 /// Format a tree into a Newick string
-pub fn format_tree<T: Display>(tree: &Tree<T>) -> Option<String> {
+pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
     let mut newick = String::new();
     format_one_tree(tree, &mut newick)?;
     Some(newick)
@@ -252,7 +252,7 @@ pub fn format_tree<T: Display>(tree: &Tree<T>) -> Option<String> {
 
 
 /// Format a forest into a Newick string, one line per tree
-pub fn format_forest<T: Display>(forest: &[Tree<T>]) -> Option<String> {
+pub fn format_forest<T: Clone + Display>(forest: &[Tree<T>]) -> Option<String> {
     let mut newick = String::new();
     for tree in forest {
         format_one_tree(tree, &mut newick)?;
@@ -263,9 +263,9 @@ pub fn format_forest<T: Display>(forest: &[Tree<T>]) -> Option<String> {
 
 
 /// Format a tree into a Newick string, held in a given string buffer
-fn format_one_tree<T: Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
+fn format_one_tree<T: Clone + Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
 
-    fn visit_node<T: Display>(tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
+    fn visit_node<T: Clone + Display>(tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
         if tree.is_leaf(node) {
             write!(newick, "{}", &tree.label(node)?).unwrap();
         } else {

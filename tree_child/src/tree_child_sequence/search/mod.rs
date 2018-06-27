@@ -6,6 +6,7 @@ mod state;
 use tree::{Tree, Leaf, Node};
 use self::history::{History, Op, Snapshot};
 use self::state::State;
+use super::{Pair, TcSeq};
 
 /// The state of the search for a tree-child sequence
 pub struct Search<T> {
@@ -17,7 +18,7 @@ pub struct Search<T> {
     history: History,
 }
 
-impl<T> Search<T> {
+impl<T: Clone> Search<T> {
 
     //----------------------------------------------------------------------------------------------
     // Initialization code
@@ -37,7 +38,7 @@ impl<T> Search<T> {
 
 
     /// Search for a tree-child sequence of weight k.
-    pub fn run(mut self) -> super::TcSeq {
+    pub fn run(mut self) -> TcSeq<T> {
         while !self.recurse() {
             self.state.increase_max_weight();
         }
@@ -334,7 +335,7 @@ mod tests {
         let v3 = Leaf::new(6);
         search.push_tree_child_pair(u1, v1);
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
-        assert_eq!(state::tests::tc_seq(&search.state), &vec![super::super::Pair::Reduce(u1, v1)]);
+        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
         let snapshot1 = search.history.take_snapshot();
         search.push_tree_child_pair(u2, v2);
         search.push_tree_child_pair(u3, v3);
@@ -342,13 +343,13 @@ mod tests {
                    history::Op::PushTreeChildPair, history::Op::PushTreeChildPair,
                    history::Op::PushTreeChildPair]);
         assert_eq!(state::tests::tc_seq(&search.state), &vec![
-                   super::super::Pair::Reduce(u1, v1),
-                   super::super::Pair::Reduce(u2, v2),
-                   super::super::Pair::Reduce(u3, v3)
+                   Pair::Reduce(u1, v1),
+                   Pair::Reduce(u2, v2),
+                   Pair::Reduce(u3, v3)
         ]);
         search.rewind_to_snapshot(snapshot1);
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
-        assert_eq!(state::tests::tc_seq(&search.state), &vec![super::super::Pair::Reduce(u1, v1)]);
+        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
         search.rewind_to_snapshot(snapshot0);
         assert!(history::tests::ops(&search.history).is_empty());
         assert!(state::tests::tc_seq(&search.state).is_empty());

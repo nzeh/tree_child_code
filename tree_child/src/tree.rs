@@ -113,6 +113,11 @@ impl<T> Removable<T> {
         &self.item
     }
 
+    /// Provide a reference to the stored item, without checking that the item is currently present
+    fn item_unchecked(&self) -> &T {
+        &self.item
+    }
+
     /// Provide a mutable reference to a stored item
     fn item_mut(&mut self) -> &mut T {
         assert!(self.is_present, "access to removed Removable");
@@ -154,7 +159,7 @@ impl Leaf {
 }
 
 
-impl<T> Tree<T> {
+impl<T: Clone> Tree<T> {
 
     /// Create a new empty tree
     pub fn new() -> Self {
@@ -235,6 +240,20 @@ impl<T> Tree<T> {
             TypedNodeData::Leaf(_, ref label) => Some(label),
             _                                 => None,
         }
+    }
+
+    /// Get the list of leaf labels
+    pub fn labels(&self) -> Vec<T> {
+        self.leaves.iter().filter_map(|leaf| {
+            leaf.as_ref().map(|leaf| {
+                let leaf = leaf.item_unchecked();
+                let node = self.nodes[leaf.id()].item_unchecked();
+                match node.data {
+                    TypedNodeData::Leaf(_, ref label) => (*label).clone(),
+                    _ => panic!("INTERNAL ERROR: Node associated with a leaf is not a leaf"),
+                }
+            })
+        }).collect()
     }
 
     /// Get the node ID of the given leaf

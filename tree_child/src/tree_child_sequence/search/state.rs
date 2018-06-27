@@ -2,6 +2,7 @@ use std::cmp::min;
 use std::mem;
 use super::cherry;
 use super::leaf;
+use super::super::{Pair, TcSeq};
 use tree::{Tree, Leaf, Node};
 
 /// The state of the search for a tree-child sequence
@@ -32,10 +33,10 @@ pub struct State<T> {
     weight: usize,
 
     /// The currently constructed tree-child sequence
-    tc_seq: super::super::TcSeq,
+    tc_seq: TcSeq<Leaf>,
 }
 
-impl<T> State<T> {
+impl<T: Clone> State<T> {
 
     //----------------------------------------------------------------------------------------------
     // Initialization code
@@ -366,12 +367,12 @@ impl<T> State<T> {
 
     /// Push a new pair to the end of the tree-child sequence
     pub fn push_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
-        self.tc_seq.push(super::super::Pair::Reduce(u, v));
+        self.tc_seq.push(Pair::Reduce(u, v));
     }
 
     /// Push the final pair in the tree-child sequence
     pub fn push_final_tree_child_pair(&mut self, leaf: Leaf) {
-        self.tc_seq.push(super::super::Pair::Final(leaf));
+        self.tc_seq.push(Pair::Final(leaf));
     }
 
     /// Remove the last pair form the tree-child sequence
@@ -380,8 +381,16 @@ impl<T> State<T> {
     }
 
     /// Retrieve the tree-child sequence
-    pub fn tc_seq(self) -> super::super::TcSeq {
-        self.tc_seq
+    pub fn tc_seq(self) -> TcSeq<T> {
+
+        let labels = self.tree(0).labels();
+
+        self.tc_seq.into_iter().map(|pair| {
+            match pair {
+                Pair::Reduce(u, v) => Pair::Reduce(labels[u.id()].clone(), labels[v.id()].clone()),
+                Pair::Final(u)     => Pair::Final(labels[u.id()].clone()),
+            }
+        }).collect()
     }
 
     //----------------------------------------------------------------------------------------------
@@ -475,7 +484,6 @@ impl<T> State<T> {
 pub mod tests {
 
     use super::*;
-    use super::super::super::Pair;
     use newick;
     use tree::TreeBuilder;
 
@@ -1763,7 +1771,7 @@ pub mod tests {
     }
 
     /// Non-destructively access the constructed tree-child sequence
-    pub fn tc_seq<T>(state: &State<T>) -> &super::super::super::TcSeq {
+    pub fn tc_seq<T>(state: &State<T>) -> &TcSeq {
         &state.tc_seq
     }
 

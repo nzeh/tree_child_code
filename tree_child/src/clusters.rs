@@ -58,7 +58,7 @@ pub fn partition<T: Clone + Eq + Hash>(trees: Vec<Tree<T>>) -> Vec<Vec<Tree<LoC<
 
 /// Number the leaves in `tree` left to right and label every node with the interval of numbers of
 /// its descendant leaves.
-fn leaf_intervals<T>(tree: &Tree<T>) -> Vec<(usize, usize)> {
+fn leaf_intervals<T: Clone>(tree: &Tree<T>) -> Vec<(usize, usize)> {
     LeafLabeller::new(tree).run()
 }
 
@@ -71,7 +71,7 @@ struct LeafLabeller<'t, T: 't> {
 }
 
 
-impl<'t, T: 't> LeafLabeller<'t, T> {
+impl<'t, T: 't + Clone> LeafLabeller<'t, T> {
     
     /// Create a new `LeafLabeller` for the given tree
     fn new(tree: &'t Tree<T>) -> Self {
@@ -114,8 +114,8 @@ impl<'t, T: 't> LeafLabeller<'t, T> {
 
 
 /// Map every node in tree t1 to the LCA of its descendant leaves in t2
-fn map_to_lca<T>(t1: &(&Tree<T>, Vec<(usize, usize)>),
-                 t2: &(&Tree<T>, Vec<(usize, usize)>)) -> Vec<Node> {
+fn map_to_lca<T: Clone>(t1: &(&Tree<T>, Vec<(usize, usize)>),
+                        t2: &(&Tree<T>, Vec<(usize, usize)>)) -> Vec<Node> {
     LcaMapper::new(t1, t2).run()
 }
 
@@ -138,7 +138,7 @@ struct LcaMapper<'t, T: 't> {
 }
 
 
-impl<'t, T: 't> LcaMapper<'t, T> {
+impl<'t, T: 't + Clone> LcaMapper<'t, T> {
 
     /// Create a new `LcaMapper` for a pair of trees whose nodes have been numbered with leaf
     /// intervals.
@@ -210,9 +210,9 @@ fn contains(i1: (usize, usize), i2: (usize, usize)) -> bool {
 
 
 /// Identify all nodes that are roots of clusters
-fn identify_clusters<T>(tree:          &Tree<T>,
-                        forward_maps:  Vec<Vec<Node>>,
-                        backward_maps: Vec<Vec<Node>>) -> (usize, Vec<Vec<Option<usize>>>) {
+fn identify_clusters<T: Clone>(tree:          &Tree<T>,
+                               forward_maps:  Vec<Vec<Node>>,
+                               backward_maps: Vec<Vec<Node>>) -> (usize, Vec<Vec<Option<usize>>>) {
 
     let mut cluster_nodes = vec![];
     cluster_nodes.push(vec![None; forward_maps[0].len()]);
