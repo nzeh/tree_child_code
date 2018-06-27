@@ -1,3 +1,5 @@
+//! This crate implements code for computing a tree-child sequence of a collection of trees.
+
 pub mod clusters;
 pub mod newick;
 pub mod tree;

@@ -1,13 +1,18 @@
-//! A module to parse Newick strings into a tree or forest.  The two main functions are
-//! `parse_tree()` and `parse_forest()`.  For `parse_tree()`, the input has to consist of a single
-//! line that is a valid Newick string representing a single tree.  For `parse_forest()`, the input
-//! has to be a multi-line text.  Each line encodes one of the trees in the forest.
+//! A module to parse Newick strings into a tree or forest and to convert a tree of forest back to
+//! a Newick string.
 //!
-//! These functions take a mutable reference to tree builder as an argument.  This is an object
-//! implementing the `Builder` trait.  The parser is implemented purely in terms of the calling
-//! the methods of the `Builder` trait.
+//! # Parsing
 //!
-//! The grammar for a a Newick string used by this parser is the following:
+//! The two main parsing functions are `parse_tree()` and `parse_forest()`.  For `parse_tree()`,
+//! the input has to consist of a single line that is a valid Newick string representing a single
+//! tree.  For `parse_forest()`, the input has to be a multi-line text.  Each line encodes one of
+//! the trees in the forest.
+//!
+//! These functions take a mutable reference to a `tree::TreeBuilder` as their first argument.
+//! A `tree::TreeBuilder` implements the construction of the tree or forest based on the methods
+//! the Newick parser calls.
+//!
+//! The grammar for a a Newick string used by the parser is the following:
 //!
 //! ```ignore
 //! Newick     -> Tree ;
@@ -20,10 +25,17 @@
 //! Nothing    ->
 //! ```
 //!
-//! **Important note:** The parser accepts any string that adheres to this grammar, but is simply
+//! **Important note:** The parser accepts any string that adheres to this grammar, but it simply
 //! ignores labels of internal nodes (nodes whose `Subtree` part is not empty) and it completely
 //! ignores edge lengths.  This is because edge lengths and labels of internal nodes are irrelevant
 //! in the context of computing tree-child hybridization networks.
+//!
+//! # Formatting
+//!
+//! The two main formatting functions are `format_tree()` and `format_forest()'.  They take a
+//! `tree::Tree` or `Vec<tree::Tree>` as argument and return a Newick string representing this tree
+//! or forest.  In the case of `format_forest()`, each tree is placed on its own line in the output
+//! string.
 
 
 use tree::{Node, Tree, TreeBuilder};
@@ -53,12 +65,36 @@ struct Pos(usize, usize);
 
 
 /// Parse a given one-line Newick string using the given tree builder
+///
+/// # Example
+///
+/// ```
+/// # use tree_child::tree;
+/// # use tree_child::newick::*;
+/// let newick      = "((a,(b,(c,d))),e);";
+/// let mut builder = tree::TreeBuilder::new();
+/// parse_tree(&mut builder, newick).unwrap();
+/// let tree = &builder.trees()[0];
+/// assert_eq!(newick, format_tree(tree).unwrap());
+/// ```
 pub fn parse_tree(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_tree()
 }
 
 
 /// Parse a given multi-line Newick string using the given tree builder
+///
+/// # Example
+///
+/// ```
+/// # use tree_child::tree;
+/// # use tree_child::newick::*;
+/// let newick      = "((a,(b,(c,d))),e);\n(a,(((b,c),d),e));\n";
+/// let mut builder = tree::TreeBuilder::new();
+/// parse_forest(&mut builder, newick).unwrap();
+/// let forest = builder.trees();
+/// assert_eq!(newick, format_forest(&forest).unwrap());
+/// ```
 pub fn parse_forest(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_forest()
 }
@@ -244,6 +280,18 @@ impl<'b, 'i> Parser<'b, 'i> {
 
 
 /// Format a tree into a Newick string
+///
+/// # Example
+///
+/// ```
+/// # use tree_child::tree;
+/// # use tree_child::newick::*;
+/// let newick      = "((a,(b,(c,d))),e);";
+/// let mut builder = tree::TreeBuilder::new();
+/// parse_tree(&mut builder, newick).unwrap();
+/// let tree = &builder.trees()[0];
+/// assert_eq!(newick, format_tree(tree).unwrap());
+/// ```
 pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
     let mut newick = String::new();
     format_one_tree(tree, &mut newick)?;
@@ -251,7 +299,19 @@ pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
 }
 
 
-/// Format a forest into a Newick string, one line per tree
+/// Format a forest into a Newick string, one line per tree.
+///
+/// # Example
+///
+/// ```
+/// # use tree_child::tree;
+/// # use tree_child::newick::*;
+/// let newick      = "((a,(b,(c,d))),e);\n(a,(((b,c),d),e));\n";
+/// let mut builder = tree::TreeBuilder::new();
+/// parse_forest(&mut builder, newick).unwrap();
+/// let forest = builder.trees();
+/// assert_eq!(newick, format_forest(&forest).unwrap());
+/// ```
 pub fn format_forest<T: Clone + Display>(forest: &[Tree<T>]) -> Option<String> {
     let mut newick = String::new();
     for tree in forest {

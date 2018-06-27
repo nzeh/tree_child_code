@@ -1,7 +1,21 @@
-//! This module implements cluster partitioning for a collection of trees.  This implementation
-//! does not work with the leaf labels directly to find matching leaves in different trees.
-//! Instead, it assumes that the leaf IDs, which are unique integers in [0,n-1] for each tree, are
-//! chosen so that the leaves with the same labels in different trees have the same integer ID.
+//! This module implements cluster partitioning for a collection of trees.  It decomposes a
+//! collection of trees into a collection of clusters and allows the tree-child sequences
+//! of the clusters to be combined into a tree-child sequence for the whole input.
+//!
+//! This implementation does not work with the leaf labels directly to find matching leaves in
+//! different trees.  Instead, it assumes that the leaf IDs, which are unique integers in [0,n-1]
+//! for each tree, are chosen so that the leaves with the same labels in different trees have the
+//! same integer ID.
+//!
+//! Two methods are provided:
+//!
+//! `partition()` takes a vector of trees and returns a vector of vectors of trees.  Each inner
+//! vector represents a cluster.
+//!
+//! `combine_tc_seqs()` takes the tree-child sequences computed for the clusters and stitches
+//! them together to obtain a tree-child sequence for the original input.  For this to work
+//! correctly, the tree-child sequences must be given in the same order as the corresponding
+//! clusters output by `partition()`.
 
 
 use std::default::Default;
@@ -31,6 +45,29 @@ pub enum LoC<T> {
 /// Partition the input trees into clusters.  In the output, the clusters are arranged bottom-up,
 /// that is, the cluster containing the leaf representing another cluster C follows C in the
 /// cluster sequence.
+///
+/// The input trees may be multifurcating, but the cluster partition is not as good as it could be
+/// in this case because the cluster partition looks only for "hard" clusters (nodes with the
+/// same set of descendant leaves in all input trees).  Usually, one wants "soft" clusters (nodes
+/// with the same set of descendant leaves in appropriate binary resolutions of the input trees).
+///
+/// # Example:
+///
+/// ```
+/// # use tree_child::newick;
+/// # use tree_child::tree;
+/// # use tree_child::clusters::{LoC, partition};
+/// let newick      = "((a,(b,(c,d))),e);\n(a,(((b,c),d),e));\n";
+/// let mut builder = tree::TreeBuilder::new();
+/// newick::parse_forest(&mut builder, newick).unwrap();
+/// let trees    = builder.trees();
+/// let clusters = partition(trees);
+/// assert_eq!(clusters.len(), 2);
+/// assert_eq!(clusters[0][0].leaf_count(), 3);
+/// assert_eq!(clusters[0][1].leaf_count(), 3);
+/// assert_eq!(clusters[1][0].leaf_count(), 3);
+/// assert_eq!(clusters[1][1].leaf_count(), 3);
+/// ```
 pub fn partition<T: Clone + Eq + Hash>(trees: Vec<Tree<T>>) -> Vec<Vec<Tree<LoC<T>>>> {
 
     let (num_clusters, cluster_nodes) = {

@@ -1,9 +1,19 @@
+//! This module provides the basic methods for manipulating phylogenetic trees.
+//!
+//! It provides two types:
+//!
+//! A `Tree<T>` is a phylogenetic tree whose leaves have labels of type `T`.  The tree may be
+//! binary or multifurcating.  
+//!
+//! A `TreeBuilder<T>` can be used to build a collection of trees, for example, when parsing a
+//! Newick string.
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::slice;
 
 
-/// A phylogenetic tree whose leaves have `usize` labels
+/// A phylogenetic tree whose leaves have labels of some type `T`
 pub struct Tree<T> {
 
     /// The set of nodes in the tree
@@ -66,20 +76,20 @@ pub struct Node(usize);
 pub struct Leaf(usize);
 
 
-/// An iterator over the nodes of a tree
+/// An iterator over the nodes of a tree (see `Tree::nodes()`).
 pub struct NodeIter<'a, T: 'a> {
     tree: &'a Tree<T>,
     node: usize,
     end:  usize,
 }
 
-/// An iterator over the leaves of a tree
+/// An iterator over the leaves of a tree (see `Tree::leaves()`).
 pub struct LeafIter<'a> {
     iter: slice::Iter<'a, Option<Removable<Node>>>,
 }
 
 
-/// An iterator over the children of a node
+/// An iterator over the children of a node (see `Tree::children()`).
 pub struct ChildIter<'a> {
     iter: slice::Iter<'a, Node>,
 }
@@ -182,7 +192,9 @@ impl<T: Clone> Tree<T> {
         self.leaf_count
     }
 
-    /// Return the root of the tree
+    /// Return the root of the tree.
+    ///
+    /// This is always `Some` node except when the tree has no nodes at all.
     pub fn root(&self) -> Option<Node> {
         self.root
     }
@@ -214,6 +226,8 @@ impl<T: Clone> Tree<T> {
     }
 
     /// Get the parent of a node
+    ///
+    /// This is `Some` parent node if the node is not the root.  Otherwise, this is `None`.
     pub fn parent(&self, node: Node) -> Option<Node> {
         self.node(node).parent
     }
@@ -227,6 +241,8 @@ impl<T: Clone> Tree<T> {
     }
 
     /// Get the leaf ID of this node
+    ///
+    /// This is `Some` leaf ID if the node is in fact a leaf.  Otherwise, this is `None`.
     pub fn leaf_id(&self, node: Node) -> Option<Leaf> {
         match self.node(node).data {
             TypedNodeData::Leaf(id, _) => Some(id),
@@ -235,6 +251,8 @@ impl<T: Clone> Tree<T> {
     }
 
     /// Get the label of this node, if it is a leaf
+    ///
+    /// This is `Some` leaf label if the node is in fact a leaf.  Otherwise, this is `None`.
     pub fn label(&self, node: Node) -> Option<&T> {
         match self.node(node).data {
             TypedNodeData::Leaf(_, ref label) => Some(label),
@@ -242,7 +260,10 @@ impl<T: Clone> Tree<T> {
         }
     }
 
-    /// Get the list of leaf labels
+    /// Get the list of leaf labels.  The output of `tree.labels()` is different from the output of
+    /// `tree.leaves().map(|leaf| tree.label(leaf).unwrap())` because the latter returns only the
+    /// labels of leaves that were not pruned from the tree.  In contrast, this method returns the
+    /// labels of all leaves in the original input, pruned or not.
     pub fn labels(&self) -> Vec<T> {
         self.leaves.iter().filter_map(|leaf| {
             leaf.as_ref().map(|leaf| {
@@ -261,7 +282,7 @@ impl<T: Clone> Tree<T> {
         *self.leaves[leaf.id()].as_ref().unwrap().item()
     }
 
-    /// Prune the given leaf from the tree
+    /// Prune the given leaf from the tree and return the parent, `None` if this leaf was the root.
     pub fn prune_leaf(&mut self, leaf: Leaf) -> Option<Node> {
         let node   = self.leaf(leaf);
         let parent = self.parent(node);
@@ -431,17 +452,38 @@ impl<'a> Iterator for ChildIter<'a> {
 }
 
 
-/// Concrete implementation of the `TreeBuilder` trait
+/// A structure to support the construction of a set of trees, both when parsing Newick strings and
+/// when computing a cluster partition.  The construction guarantees that all leaves with the same
+/// label in different trees receive the same leaf ID, so leaves in different trees can be matched
+/// to each other during cluster partition or the search for a tree-child sequence based on their
+/// IDs.
+///
+/// The `TreeBuilder` holds a "current tree" and a set of trees that were already built.
+/// Initially, there is no current tree.
+///
+/// `TreeBuilder::new_tree()` creates a new empty tree and makes it the current tree.
+///
+/// `TreeBuilder::new_leaf()` adds a new leaf to the current tree.  This leaf is "floating" in the
+/// sense that it does not have a parent yet.
+///
+/// `TreeBuilder::new_node()` takes a list of nodes in the current tree and creates a new node that
+/// has these nodes as its children.
+///
+/// `TreeBuilder::finish_tree()` takes a "floating" node in the current tree as argument, makes this
+/// node the root of the current tree, and then adds the current tree to the list of completely
+/// built trees.  We're now back to not having a current tree.
+///
+/// The set of constructed trees is retrieved using `TreeBuilder::trees()`.
 pub struct TreeBuilder<T> {
 
-    // The current tree under construction
+    /// The current tree under construction
     current_tree: Option<Tree<T>>,
 
-    // The set of trees already constructed
+    /// The set of trees already constructed
     trees: Vec<Tree<T>>,
 
-    // Hash map to map labels to leaf IDs to ensure leaves with the same label in different trees
-    // get the same ID.
+    /// Hash map to map labels to leaf IDs to ensure leaves with the same label in different trees
+    /// get the same ID.
     leaf_ids: HashMap<T, Leaf>,
 }
 
@@ -502,7 +544,7 @@ where T: Clone + Eq + Hash {
     }
 
     /// Make the given node the root of the active tree and add the tree to the list of finished
-    /// trees.  No tree is active aftewards.
+    /// trees.  No tree is active afterwards.
     pub fn finish_tree(&mut self, root: Node) {
         self.current_tree.as_mut().map(|t| t.root = Some(root));
         self.trees.push(self.current_tree.take().unwrap());

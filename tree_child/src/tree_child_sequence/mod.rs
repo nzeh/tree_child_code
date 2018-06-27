@@ -1,3 +1,6 @@
+//! This module implements the algorithm for constructing a tree-child sequence for a set of trees.
+//! The function to construct a tree-child sequence is `tree_child_sequence()`.
+
 use std::fmt;
 use tree::Tree;
 
@@ -15,7 +18,7 @@ pub enum Pair<T> {
 }
 
 
-/// A tree-child sequence is just a sequence of pairs
+/// A tree-child sequence is just a sequence of `Pair`s
 pub type TcSeq<T> = Vec<Pair<T>>;
 
 
