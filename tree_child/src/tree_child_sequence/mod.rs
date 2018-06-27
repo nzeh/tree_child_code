@@ -22,3 +22,20 @@ pub type TcSeq = Vec<Pair>;
 pub fn tree_child_sequence<T>(trees: Vec<Tree<T>>) -> TcSeq {
     search::Search::new(trees).run()
 }
+
+#[cfg(test)]
+mod test_support {
+
+    use std::fmt;
+    use super::Pair;
+
+    impl fmt::Display for Pair {
+
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Pair::Reduce(u, v) => write!(f, "({}, {})", u.id(), v.id()),
+                Pair::Final(u)     => write!(f, "({}, -)", u.id()),
+            }
+        }
+    }
+}

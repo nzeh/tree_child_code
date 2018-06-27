@@ -27,7 +27,9 @@
 
 
 use tree::{Node, Tree, TreeBuilder};
-use std::fmt::Write;
+use std::error;
+use std::fmt;
+use std::fmt::{Display, Write};
 use std::iter;
 use std::result;
 use std::str;
@@ -242,7 +244,7 @@ impl<'b, 'i> Parser<'b, 'i> {
 
 
 /// Format a tree into a Newick string
-pub fn format_tree(tree: &Tree<String>) -> Option<String> {
+pub fn format_tree<T: Display>(tree: &Tree<T>) -> Option<String> {
     let mut newick = String::new();
     format_one_tree(tree, &mut newick)?;
     Some(newick)
@@ -250,7 +252,7 @@ pub fn format_tree(tree: &Tree<String>) -> Option<String> {
 
 
 /// Format a forest into a Newick string, one line per tree
-pub fn format_forest(forest: &[Tree<String>]) -> Option<String> {
+pub fn format_forest<T: Display>(forest: &[Tree<T>]) -> Option<String> {
     let mut newick = String::new();
     for tree in forest {
         format_one_tree(tree, &mut newick)?;
@@ -261,11 +263,11 @@ pub fn format_forest(forest: &[Tree<String>]) -> Option<String> {
 
 
 /// Format a tree into a Newick string, held in a given string buffer
-fn format_one_tree(tree: &Tree<String>, newick: &mut String) -> Option<()> {
+fn format_one_tree<T: Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
 
-    fn visit_node(tree: &Tree<String>, newick: &mut String, node: Node) -> Option<()> {
+    fn visit_node<T: Display>(tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
         if tree.is_leaf(node) {
-            newick.write_str(&tree.label(node)?).unwrap();
+            write!(newick, "{}", &tree.label(node)?).unwrap();
         } else {
             newick.write_char('(').unwrap();
             let mut children = tree.children(node);
@@ -391,5 +393,26 @@ mod tests {
     fn parse_forest_two_edge_lengths_failure() {
         let mut builder = TreeBuilder::new();
         assert!(parse_forest(&mut builder, "((a,b:34:1),c));(d,(e,f));").is_err());
+    }
+}
+
+impl error::Error for Error {
+
+    fn description(&self) -> &str {
+        "Newick parse error"
+    }
+}
+
+impl fmt::Display for Error {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} at position {}", self.message, self.pos)
+    }
+}
+
+impl fmt::Display for Pos {
+
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.0, self.1)
     }
 }

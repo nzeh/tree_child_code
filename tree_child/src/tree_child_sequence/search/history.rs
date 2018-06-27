@@ -52,8 +52,9 @@ pub enum Op {
     /// Remove a cherry from the list of non-trivial cherries
     RemoveNonTrivialCherry(usize, cherry::Cherry),
 
-    /// Record a new cherry
-    RecordCherry(cherry::Ref),
+    /// Record a new cherry and remember which cherry took its place if it was moved from the
+    /// non-trivial cherry list to the trivial cherry list
+    RecordCherry(cherry::Ref, Option<cherry::Ref>),
 
     /// Prune a leaf from a tree
     PruneLeaf(Leaf, usize),
@@ -76,7 +77,7 @@ pub struct Snapshot(usize);
 
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
     use super::*;
 
@@ -105,5 +106,10 @@ mod tests {
         let undo1 = history.rewind(snapshot1).collect::<Vec<Op>>();
         assert_eq!(history.0, vec![Op::PushTrivialCherry, Op::PushTreeChildPair]);
         assert_eq!(undo1, vec![Op::PushTrivialCherry, Op::IncreaseWeight]);
+    }
+
+    /// Helper methods for inspecting the internal state of the history
+    pub fn ops(history: &History) -> &Vec<Op> {
+        &history.0
     }
 }
