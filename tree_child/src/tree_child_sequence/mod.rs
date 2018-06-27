@@ -1,3 +1,4 @@
+use std::fmt;
 use tree::Tree;
 
 mod search;
@@ -23,19 +24,13 @@ pub fn tree_child_sequence<T: Clone>(trees: Vec<Tree<T>>) -> TcSeq<T> {
     search::Search::new(trees).run()
 }
 
-#[cfg(test)]
-mod test_support {
+/// Let's make pairs printable
+impl<T: fmt::Display> fmt::Display for Pair<T> {
 
-    use std::fmt;
-    use super::Pair;
-
-    impl<T: fmt::Display> fmt::Display for Pair<T> {
-
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            match self {
-                Pair::Reduce(u, v) => write!(f, "({}, {})", u, v),
-                Pair::Final(u)     => write!(f, "({}, -)", u),
-            }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Pair::Reduce(u, v) => write!(f, "({}, {})", u, v),
+            Pair::Final(u)     => write!(f, "({}, -)", u),
         }
     }
 }
