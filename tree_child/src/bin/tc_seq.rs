@@ -8,6 +8,7 @@ use std::fs;
 use std::io;
 use std::io::Read;
 
+use tree_child::clusters;
 use tree_child::newick;
 use tree_child::tree::{Tree, TreeBuilder};
 use tree_child::tree_child_sequence::{tree_child_sequence, TcSeq, Pair};
@@ -50,15 +51,19 @@ type Result<T> = std::result::Result<T, AppError>;
 fn main() {
     let args = clap_app!(
         TcSeq =>
-        (version: "0.1")
+        (version: env!("CARGO_PKG_VERSION"))
         (author: "Norbert Zeh <nzeh@cs.dal.ca>")
         (about: "Compute a tree-child sequence of a set of binary phylogenetic trees")
         (@arg output: -o --output [output] "the file to write the resulting sequence to (stdout if absent)")
         (@arg input: <input> "The file containing the set of input trees")
+        (@arg dont_use_clustering: -c --("no-clustering") "Disable the use of cluster reduction to speed up the code")
+        //(@arg dont_limit_fanout: -b --("no-branch-bound") "Disable limiting the branching fan-out based on the hybridization number")
     ).get_matches();
 
-    let input  = args.value_of("input").unwrap();
-    let output = args.value_of("output");
+    let input          = args.value_of("input").unwrap();
+    let output         = args.value_of("output");
+    let use_clustering = !args.is_present("dont_use_clustering");
+    //let limit_fanout   = !args.is_present("dont_limit_fanout");
 
     let trees = match read_input(input) {
         Ok(trees) => trees,
@@ -68,7 +73,14 @@ fn main() {
         },
     };
 
-    let tc_seq = tree_child_sequence(trees);
+    let tc_seq = if use_clustering {
+        let clusters = clusters::partition(trees);
+        let seqs = clusters.into_iter().map(|trees| tree_child_sequence(trees)).collect();
+        clusters::combine_tc_seqs(seqs)
+    } else {
+        tree_child_sequence(trees)
+    };
+
     if let Err(e) = write_output(output, tc_seq) {
         eprintln!("{}", e);
         std::process::exit(1);

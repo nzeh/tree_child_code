@@ -7,7 +7,7 @@ use tree::Tree;
 mod search;
 
 /// An entry in a tree-child sequence
-#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Pair<T> {
 
     /// A pair (x, y) that eliminates x from every tree that has (x, y) as a cherry

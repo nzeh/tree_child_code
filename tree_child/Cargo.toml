@@ -4,4 +4,4 @@ version = "0.1.0"
 authors = ["Norbert Zeh <nzeh@cs.dal.ca>"]
 
 [dependencies]
-clap = "2.31,2"
+clap = "2.31.2"

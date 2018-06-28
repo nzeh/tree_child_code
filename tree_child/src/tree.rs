@@ -14,6 +14,7 @@ use std::slice;
 
 
 /// A phylogenetic tree whose leaves have labels of some type `T`
+#[derive(Clone)]
 pub struct Tree<T> {
 
     /// The set of nodes in the tree
@@ -34,6 +35,7 @@ pub struct Tree<T> {
 
 
 /// A marker type that holds on to an element and marks it as alive or dead
+#[derive(Clone)]
 struct Removable<T> {
     
     /// The stored item
@@ -45,6 +47,7 @@ struct Removable<T> {
 
 
 /// The data associated with a node
+#[derive(Clone)]
 struct NodeData<T> {
 
     /// Parent
@@ -56,6 +59,7 @@ struct NodeData<T> {
 
 
 /// The part of the node data that's specific to leaves or internal nodes.
+#[derive(Clone)]
 enum TypedNodeData<T> {
 
     /// An leaf has an ID of type `Leaf` and a label of type `T`.

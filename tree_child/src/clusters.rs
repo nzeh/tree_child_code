@@ -20,8 +20,9 @@
 
 use std::default::Default;
 use std::hash::Hash;
+use std::iter::Sum;
 use tree::{Node, Tree, TreeBuilder};
-//use tree_child_sequence::{Pair, TcSeq};
+use tree_child_sequence::{Pair, TcSeq};
 
 
 /// The type used to represent clusters in the cluster partition
@@ -365,59 +366,87 @@ impl<T: Clone + Eq + Hash> Decomposer<T> {
 }
 
 
-///// Assemble the tree-child sequence of the original input from tree-child sequences constructed
-///// for individual clusters.  This assumes that the tree-child sequences are arranged in the same
-///// order as in the output of `partition()`.
-//pub fn combine_tc_seqs<T>(tc_seqs: Vec<TcSeq<Loc<T>>>) -> TcSeq<T> {
-//
-//    // The last leaf remaining in each tree-child sequence
-//    let mut last_leaves = vec![0; tc_seqs.len()];
-//
-//    // Initialize the last leaves
-//    for (i, tc_seq) in &tc_seqs.iter().enumerate() {
-//        let Pair::Final(leaf) = tc_seq[tc_seq.len() - 1];
-//        match leaf {
-//            Loc::Node(l)    => last_leaves[i] = l,
-//            Loc::Cluster(c) => last_leaves[i] = last_leaves[c],
-//        }
-//    }
-//
-//    // The combined sequence
-//    let combined_seq = Vec::with_capacity(usize::sum(&tc_seqs.iter().map(|seq| seq.len() - 1)) + 1);
-//
-//    // Build the combined sequence
-//    for tc_seq in &tc_seqs.iter() {
-//        for pair in tc_seq[..tc_seq.len() - 1] {
-//            if let Pair::Reduce(x, y) = pair {
-//                let x_ = match x {
-//                    Loc::Node(l)    => l,
-//                    Loc::Cluster(c) => last_leaves[c],
-//                };
-//                let y_ = match y {
-//                    Loc::Node(l)    => l,
-//                    Loc::Cluster(c) => last_leaves[c],
-//                };
-//                combined_seq.push(Pair::Reduce(x_, y_));
-//            }
-//        }
-//    }
-//
-//    // Add the final leaf
-//    let tc_seq = tc_seqs[tc_seqs.len() - 1];
-//    if let Pair::Final(leaf) = tc_seq[tc_seq.len() - 1] {
-//        combined_seq.push(match leaf {
-//            Loc::Node(l)    => l,
-//            Loc::Cluster(c) => last_leaves[c],
-//        });
-//    }
-//
-//    combined_seq
-//}
+/// Assemble the tree-child sequence of the original input from tree-child sequences constructed
+/// for individual clusters.  This assumes that the tree-child sequences are arranged in the same
+/// order as in the output of `partition()`.
+pub fn combine_tc_seqs<T: Clone>(tc_seqs: Vec<TcSeq<LoC<T>>>) -> TcSeq<T> {
+    let num_clusters     = tc_seqs.len();
+    let combined_seq_len = usize::sum(tc_seqs.iter().map(|seq| seq.len() - 1)) + 1;
+    let mut combiner = SeqCombiner::new(num_clusters, combined_seq_len);
+    for (i, tc_seq) in tc_seqs.into_iter().enumerate() {
+        combiner.append_seq(i, tc_seq);
+    }
+    combiner.seq()
+}
+
+/// The state of the combination process of tree-child sequences of a set fo clusters
+struct SeqCombiner<T> {
+
+    /// The number of clusters whose sequences are to be combined
+    num_clusters: usize,
+
+    /// The combined_sequence
+    seq: TcSeq<T>,
+
+    /// The final leaves in the cluster tree-child sequences seen so far
+    final_leaves: Vec<T>,
+}
+
+impl<T: Clone> SeqCombiner<T> {
+
+    /// Create a new SeqCombiner
+    fn new(num_clusters: usize, combined_seq_len: usize) -> Self {
+        SeqCombiner {
+            num_clusters,
+            seq:          Vec::with_capacity(combined_seq_len),
+            final_leaves: Vec::with_capacity(num_clusters),
+        }
+    }
+
+    /// Convert and append the pairs in a cluster tree-child sequence to the combined sequence
+    fn append_seq(&mut self, cluster: usize, seq: TcSeq<LoC<T>>) {
+        for pair in seq {
+            self.append_pair(cluster, pair);
+        }
+    }
+
+    /// Convert and append a pair in a cluster tree-child sequence to the combined sequence
+    fn append_pair(&mut self, cluster: usize, pair: Pair<LoC<T>>) {
+        match pair {
+            Pair::Reduce(x, y) => {
+                let x = self.convert_leaf(x);
+                let y = self.convert_leaf(y);
+                self.seq.push(Pair::Reduce(x, y));
+            },
+            Pair::Final(x) => {
+                let x = self.convert_leaf(x);
+                if cluster == self.num_clusters - 1 {
+                    self.seq.push(Pair::Final(x));
+                } else {
+                    self.final_leaves.push(x);
+                }
+            },
+        }
+    }
+
+    /// Map each reference to a cluster to the final leaf in the cluster
+    fn convert_leaf(&self, leaf: LoC<T>) -> T {
+        match leaf {
+            LoC::Leaf(leaf)          => leaf,
+            LoC::Cluster(Cluster(c)) => self.final_leaves[c].clone(),
+        }
+    }
+
+    /// Get the final sequence
+    fn seq(self) -> TcSeq<T> {
+        self.seq
+    }
+}
 
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use super::{Node, Tree, TreeBuilder, LoC, Cluster, Pair};
     use newick;
 
     /// Construct a forest to be used in subsequent tests
@@ -439,9 +468,9 @@ mod tests {
 
     /// Test that the leaf intervals are computed correctly
     #[test]
-    fn test_leaf_intervals() {
+    fn leaf_intervals() {
         let trees                               = build_forest();
-        let intervals: Vec<Vec<(usize, usize)>> = trees.iter().map(leaf_intervals).collect();
+        let intervals: Vec<Vec<(usize, usize)>> = trees.iter().map(super::leaf_intervals).collect();
         assert_eq!(intervals[0],
                    vec![
                    (0,0),(1,1),(2,2),(1,2),(3,3),(4,4),(3,4),(5,5),(6,6),(7,7),(5,7),
@@ -465,17 +494,17 @@ mod tests {
 
     /// Test that the LCA mapping is correct
     #[test]
-    fn test_lca_mapping() {
+    fn lca_mapping() {
         let trees     = build_forest();
-        let intervals = trees.iter().map(leaf_intervals);
+        let intervals = trees.iter().map(super::leaf_intervals);
         let numbered_trees: Vec<(&Tree<String>, Vec<(usize, usize)>)>
             = trees.iter().zip(intervals).collect();
         let forward_maps: Vec<Vec<usize>> = numbered_trees[1..].iter()
-            .map(|t| map_to_lca(&numbered_trees[0], t))
+            .map(|t| super::map_to_lca(&numbered_trees[0], t))
             .map(|m| m.into_iter().map(|node| node.id()).collect())
             .collect();
         let backward_maps: Vec<Vec<usize>> = numbered_trees[1..].iter()
-            .map(|t| map_to_lca(t, &numbered_trees[0]))
+            .map(|t| super::map_to_lca(t, &numbered_trees[0]))
             .map(|m| m.into_iter().map(|node| node.id()).collect())
             .collect();
         assert_eq!(forward_maps[0],
@@ -498,17 +527,17 @@ mod tests {
 
     /// Test that the clusters are identified correctly
     #[test]
-    fn test_identify_clusters() {
+    fn identify_clusters() {
         let trees = build_forest();
         let (num_clusters, cluster_nodes) = {
-            let intervals = trees.iter().map(leaf_intervals);
+            let intervals = trees.iter().map(super::leaf_intervals);
             let numbered_trees: Vec<(&Tree<String>, Vec<(usize, usize)>)>
                 = trees.iter().zip(intervals).collect();
             let forward_maps = numbered_trees[1..].iter()
-                .map(|t| map_to_lca(&numbered_trees[0], t)).collect();
+                .map(|t| super::map_to_lca(&numbered_trees[0], t)).collect();
             let backward_maps = numbered_trees[1..].iter()
-                .map(|t| map_to_lca(t, &numbered_trees[0])).collect();
-            identify_clusters(&trees[0], forward_maps, backward_maps)
+                .map(|t| super::map_to_lca(t, &numbered_trees[0])).collect();
+            super::identify_clusters(&trees[0], forward_maps, backward_maps)
         };
         assert_eq!(num_clusters, 5);
         assert_eq!(cluster_nodes[0],
@@ -572,20 +601,20 @@ mod tests {
 
     /// Test that the trees are decomposed correctly
     #[test]
-    fn test_decompose_trees() {
+    fn decompose_trees() {
         let trees = build_forest();
         let (num_clusters, cluster_nodes) = {
-            let intervals = trees.iter().map(leaf_intervals);
+            let intervals = trees.iter().map(super::leaf_intervals);
             let numbered_trees: Vec<(&Tree<String>, Vec<(usize, usize)>)>
                 = trees.iter().zip(intervals).collect();
             let forward_maps = numbered_trees[1..].iter()
-                .map(|t| map_to_lca(&numbered_trees[0], t)).collect();
+                .map(|t| super::map_to_lca(&numbered_trees[0], t)).collect();
             let backward_maps = numbered_trees[1..].iter()
-                .map(|t| map_to_lca(t, &numbered_trees[0])).collect();
-            identify_clusters(&trees[0], forward_maps, backward_maps)
+                .map(|t| super::map_to_lca(t, &numbered_trees[0])).collect();
+            super::identify_clusters(&trees[0], forward_maps, backward_maps)
         };
         let clusters =
-            with_string_labels(decompose_trees(trees, num_clusters, cluster_nodes));
+            with_string_labels(super::decompose_trees(trees, num_clusters, cluster_nodes));
         assert_eq!(clusters.len(), 5);
         let expected_newicks = [
             "((o,n),(l,m,p));\n(l,((m,n),(o,p)));\n(l,((o,n,p),m));\n",
@@ -601,9 +630,9 @@ mod tests {
 
     /// Now test the whole package
     #[test]
-    fn test_partition() {
+    fn partition() {
         let trees = build_forest();
-        let clusters = with_string_labels(partition(trees));
+        let clusters = with_string_labels(super::partition(trees));
         assert_eq!(clusters.len(), 5);
         let expected_newicks = [
             "((o,n),(l,m,p));\n(l,((m,n),(o,p)));\n(l,((o,n,p),m));\n",
@@ -615,5 +644,19 @@ mod tests {
         for i in 0..clusters.len() {
             assert_eq!(newick::format_forest(&clusters[i]).unwrap(), expected_newicks[i]);
         }
+    }
+
+    /// Test that combining tree-child sequences works correctly
+    #[test]
+    fn combine_tc_seqs() {
+        let seq1 = vec![Pair::Reduce(LoC::Leaf(1), LoC::Leaf(2)), Pair::Reduce(LoC::Leaf(3), LoC::Leaf(4)), Pair::Final(LoC::Leaf(5))];
+        let seq2 = vec![Pair::Reduce(LoC::Leaf(6), LoC::Cluster(Cluster(0))), Pair::Final(LoC::Leaf(7))];
+        let seq3 = vec![Pair::Reduce(LoC::Leaf(8), LoC::Leaf(9)), Pair::Final(LoC::Cluster(Cluster(1)))];
+        let seq4 = vec![Pair::Reduce(LoC::Leaf(10), LoC::Leaf(11)), Pair::Reduce(LoC::Leaf(12), LoC::Leaf(13)), Pair::Final(LoC::Leaf(14))];
+        let seq5 = vec![Pair::Reduce(LoC::Cluster(Cluster(3)), LoC::Leaf(15)), Pair::Final(LoC::Cluster(Cluster(2)))];
+        let seqs = vec![seq1, seq2, seq3, seq4, seq5];
+        let comb = vec![Pair::Reduce(1, 2), Pair::Reduce(3, 4), Pair::Reduce(6, 5), Pair::Reduce(8, 9), Pair::Reduce(10, 11), Pair::Reduce(12, 13),
+        Pair::Reduce(14, 15), Pair::Final(7)];
+        assert_eq!(super::combine_tc_seqs(seqs), comb);
     }
 }
