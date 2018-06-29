@@ -57,13 +57,17 @@ fn main() {
         (@arg output: -o --output [output] "the file to write the resulting sequence to (stdout if absent)")
         (@arg input: <input> "The file containing the set of input trees")
         (@arg dont_use_clustering: -c --("no-clustering") "Disable the use of cluster reduction to speed up the code")
-        //(@arg dont_limit_fanout: -b --("no-branch-bound") "Disable limiting the branching fan-out based on the hybridization number")
+        (@arg optimize_redundant_branches: -r --("redundant-branch-opt") "Enable the elimination of redundant branches in the search
+(EXPERIMENTAL)")
+        (@arg dont_limit_fanout: -b --("no-branch-bound") "Disable limiting the branching fan-out based on the
+hybridization number")
     ).get_matches();
 
-    let input          = args.value_of("input").unwrap();
-    let output         = args.value_of("output");
-    let use_clustering = !args.is_present("dont_use_clustering");
-    //let limit_fanout   = !args.is_present("dont_limit_fanout");
+    let input                    = args.value_of("input").unwrap();
+    let output                   = args.value_of("output");
+    let use_clustering           = !args.is_present("dont_use_clustering");
+    let use_redundant_branch_opt = args.is_present("optimize_redundant_branches");
+    let limit_fanout             = !args.is_present("dont_limit_fanout");
 
     let trees = match read_input(input) {
         Ok(trees) => trees,
@@ -75,10 +79,11 @@ fn main() {
 
     let tc_seq = if use_clustering {
         let clusters = clusters::partition(trees);
-        let seqs = clusters.into_iter().map(|trees| tree_child_sequence(trees)).collect();
+        let seqs = clusters.into_iter().map(
+            |trees| tree_child_sequence(trees, limit_fanout, use_redundant_branch_opt)).collect();
         clusters::combine_tc_seqs(seqs)
     } else {
-        tree_child_sequence(trees)
+        tree_child_sequence(trees, limit_fanout, use_redundant_branch_opt)
     };
 
     if let Err(e) = write_output(output, tc_seq) {

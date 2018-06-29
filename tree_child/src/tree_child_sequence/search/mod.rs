@@ -19,6 +19,12 @@ pub struct Search<T> {
 
     /// Recursion stack
     stack: Vec<BranchPoint>,
+
+    /// Limit the fanout (on by default but can disable to see whether this is indeed correct)
+    limit_fanout: bool,
+
+    /// Use the redundant branch optimization (EXPERIMENTAL FEATURE)
+    use_redundant_branch_opt: bool,
 }
 
 /// A branch point is defined by a snapshot of the state before the branch, an index of the
@@ -43,11 +49,13 @@ impl<T: Clone> Search<T> {
     //----------------------------------------------------------------------------------------------
 
     /// Create a new search state
-    pub fn new(trees: Vec<Tree<T>>) -> Self {
+    pub fn new(trees: Vec<Tree<T>>, limit_fanout: bool, use_redundant_branch_opt: bool) -> Self {
         Search {
             state:   State::new(trees),
             history: History::new(),
             stack:   Vec::new(),
+            limit_fanout,
+            use_redundant_branch_opt,
         }
     }
 
@@ -86,7 +94,7 @@ impl<T: Clone> Search<T> {
     /// most 4*max_weight non-trivial cherries
     fn can_succeed(&self) -> bool {
         self.state.weight() < self.state.max_weight() &&
-            self.state.num_non_trivial_cherries() <= 4*self.state.max_weight()
+            (!self.limit_fanout || self.state.num_non_trivial_cherries() <= 4*self.state.max_weight())
     }
 
     /// Create a new branch point and return a snapshot of the state at the time of the branch
@@ -168,7 +176,7 @@ impl<T: Clone> Search<T> {
             // Cutting u is allowed only if v has not been cut yet and necessary only if u has not
             // been cut in all trees of the current cherry yet.
             if  self.state.leaf(v).num_occurrences() == self.state.num_trees() &&
-                cut_count < cherry.num_occurrences() {
+                (!self.use_redundant_branch_opt || cut_count < cherry.num_occurrences()) {
 
                 // Record the tree-child pair and cut u in all trees that have the cherry (u, v)
                 self.increase_weight();
@@ -402,7 +410,7 @@ mod tests {
     #[test]
     fn new() {
         let (trees, newicks) = state::tests::build_forest();
-        let search = Search::new(trees);
+        let search = Search::new(trees, true, true);
         state::tests::test_new(search.state, newicks);
         assert!(history::tests::ops(&search.history).is_empty());
     }
@@ -411,7 +419,7 @@ mod tests {
     #[test]
     fn do_undo_increase_weight() {
         let (trees, _) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let snapshot = search.history.take_snapshot();
         search.increase_weight();
         assert_eq!(search.state.weight(), 1);
@@ -426,7 +434,7 @@ mod tests {
     #[test]
     fn do_undo_push_tree_child_pair() {
         let (trees, _) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let snapshot0 = search.history.take_snapshot();
         let u1 = Leaf::new(4);
         let v1 = Leaf::new(3);
@@ -461,7 +469,7 @@ mod tests {
     #[test]
     fn do_undo_prune_leaf_suppress_node() {
         let (trees, newicks) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let d = Leaf::new(2);
         let e = Leaf::new(6);
         let newick0_0 = newicks[0].clone();
@@ -502,7 +510,7 @@ mod tests {
     #[test]
     fn do_undo_remove_cherry() {
         let (trees, _) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let empty_vec: Vec<&cherry::Ref> = vec![];
         let snapshot0 = search.history.take_snapshot();
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -664,7 +672,7 @@ mod tests {
     #[test]
     fn do_undo_push_pop_trivial_cherry() {
         let (trees, _) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let empty_vec: Vec<&cherry::Ref> = vec![];
         let snapshot0 = search.history.take_snapshot();
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -921,7 +929,7 @@ mod tests {
     #[test]
     fn do_undo_record_cherry() {
         let (trees, _) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let snapshot0 = search.history.take_snapshot();
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1107,7 +1115,7 @@ mod tests {
     #[test]
     fn resolve_trivial_cherries() {
         let (trees, newicks) = state::tests::build_forest();
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         let newick1 = String::from("(((a,c),d),((b,f),(e,h)));");
         let newick2 = String::from("((a,(d,c)),((e,(h,f)),b));");
         let newick3 = String::from("((((h,(f,(e,c))),b),a),d);");
@@ -1241,7 +1249,7 @@ mod tests {
             newick::parse_forest(&mut builder, &newick).unwrap();
             builder.trees()
         };
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
         assert!(search.search_is_done());
         let seq = search.state.tc_seq();
@@ -1270,7 +1278,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
         assert!(!search.search());
     }
@@ -1284,7 +1292,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
         search.state.increase_max_weight();
         assert!(search.search());
@@ -1314,7 +1322,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
         search.state.increase_max_weight();
         assert!(!search.search());
@@ -1329,7 +1337,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let mut search = Search::new(trees);
+        let mut search = Search::new(trees, true, true);
         search.state.increase_max_weight();
         search.state.increase_max_weight();
         search.resolve_trivial_cherries();
@@ -1360,7 +1368,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let search = Search::new(trees);
+        let search = Search::new(trees, true, true);
         let seq = search.run();
         assert_eq!(seq.len(), 7);
         let mut string = String::new();
