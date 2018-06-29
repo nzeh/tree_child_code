@@ -16,6 +16,24 @@ pub struct Search<T> {
 
     /// The history of operations performed on the current search path, so they can be undone
     history: History,
+
+    /// Recursion stack
+    stack: Vec<BranchPoint>,
+}
+
+/// A branch point is defined by a snapshot of the state before the branch, an index of the
+/// non-trivial cherry to resolve next, and a Boolean flag that indicates whether we're cutting
+/// the first leaf.
+struct BranchPoint {
+
+    /// The history snapshot before branching
+    snapshot: Snapshot,
+
+    /// The index of the cherry to resolve
+    cherry: usize,
+
+    /// Are we branching on the first leaf of the cherry?
+    first_leaf: bool,
 }
 
 impl<T: Clone> Search<T> {
@@ -29,6 +47,7 @@ impl<T: Clone> Search<T> {
         Search {
             state:   State::new(trees),
             history: History::new(),
+            stack:   Vec::new(),
         }
     }
 
@@ -39,75 +58,127 @@ impl<T: Clone> Search<T> {
 
     /// Search for a tree-child sequence of weight k.
     pub fn run(mut self) -> TcSeq<T> {
-        while !self.recurse() {
-            self.state.increase_max_weight();
+
+        // Eliminate all cherries that are trivial from the start.
+        self.resolve_trivial_cherries();
+
+        // Are we haven't found a (trivial) tree-child sequence already, then search for one.
+        if !self.search_is_done() {
+            loop {
+                self.state.increase_max_weight();
+                if self.search() { break; }
+            }
         }
         self.state.tc_seq()
     }
 
-    /// Recursively search for a tree-child sequence
-    fn recurse(&mut self) -> bool {
-
-        // First eliminate all trivial cherries
-        self.resolve_trivial_cherries();
-
+    /// Check whether the search is done and push the final tree-child pair if this is the case.
+    fn search_is_done(&mut self) -> bool {
         if let Some(leaf) = self.state.final_leaf() {
-            // If there is only one leaf left, we have found a tree-child sequence and report
-            // success after pushing the final pair to the tree-child sequence.
             self.state.push_final_tree_child_pair(leaf);
             true
         } else {
-            // If there is more than one leaf left, we need to try to resolve non-trivial cherries
-            // and recursively continue the search.
+            false
+        }
+    }
 
-            if self.state.weight() < self.state.max_weight() {
-                // If we haven't reached the maximum weight of an acceptable tree-child sequence in
-                // the current search, try branching.
+    /// The search can succeed only if we haven't reached the maximum weight yet and we have at
+    /// most 4*max_weight non-trivial cherries
+    fn can_succeed(&self) -> bool {
+        self.state.weight() < self.state.max_weight() &&
+            self.state.num_non_trivial_cherries() <= 4*self.state.max_weight()
+    }
 
-                if self.state.num_non_trivial_cherries() > 4*self.state.max_weight() {
-                    // If there are more than 4*max_weight cherries to branch on, then the
-                    // tree-child hybridization number is greater than max_weight, abort.
-                    false
-                } else {
-                    // Otherwise, branch.
-                    let restore_cherry = self.history.take_snapshot();
-                    for index in 0..self.state.num_non_trivial_cherries() {
-                        let cherry = self.remove_cherry(cherry::Ref::NonTrivial(index));
-                        let undo_cuts = self.history.take_snapshot();
-                        let (u, v) = cherry.leaves();
-                        if self.state.leaf(v).num_occurrences() == self.state.num_trees() {
-                            self.increase_weight();
-                            self.push_tree_child_pair(u, v);
-                            for tree in cherry.trees() {
-                                self.prune_leaf(u, *tree);
-                            }
-                            if self.recurse() {
-                                return true;
-                            }
-                            if self.state.leaf(u).num_occurrences() == self.state.num_trees() {
-                                self.rewind_to_snapshot(undo_cuts);
-                            }
-                        }
-                        if self.state.leaf(u).num_occurrences() == self.state.num_trees() {
-                            self.increase_weight();
-                            self.push_tree_child_pair(v, u);
-                            for tree in cherry.trees() {
-                                self.prune_leaf(v, *tree);
-                            }
-                            if self.recurse() {
-                                return true;
-                            }
-                        }
-                        self.rewind_to_snapshot(restore_cherry);
-                    }
-                    false
-                }
+    /// Create a new branch point and return a snapshot of the state at the time of the branch
+    fn start_branch(&mut self) -> Snapshot {
+        let snapshot = self.history.take_snapshot();
+        self.stack.push(BranchPoint {
+            snapshot,
+            cherry:     0,
+            first_leaf: true,
+        });
+        snapshot
+    }
+
+    /// Get the next branch to evaluate
+    fn next_branch(&mut self) -> Option<(usize, bool)> {
+        if !self.stack.is_empty() {
+            let (snapshot, cherry, first_leaf) = {
+                let branch_point = self.stack.last().unwrap();
+                (branch_point.snapshot, branch_point.cherry, branch_point.first_leaf)
+            };
+            self.rewind_to_snapshot(snapshot);
+            if first_leaf {
+                // If we're currently at the first leaf of the current cherry, the next branch
+                // needs to try the second leaf of the same cherry.
+                let branch_point = self.stack.last_mut().unwrap();
+                branch_point.first_leaf = false;
+            } else if cherry < self.state.num_non_trivial_cherries() - 1 {
+                // If we're already at the second leaf, the next option to try is the first leaf of
+                // the next cherry.
+                let branch_point = self.stack.last_mut().unwrap();
+                branch_point.first_leaf = true;
+                branch_point.cherry += 1;
             } else {
-                // If we have reached the maximum weight of an acceptable tree-child sequence in
-                // the current search, report failure in this branch
-                false
+                // Otherwise, we're done with this branch point, so pop it.
+                self.stack.pop();
+            }
+            Some((cherry, first_leaf))
+        } else {
+            None
+        }
+    }
+
+    /// Recursively search for a tree-child sequence
+    fn search(&mut self) -> bool {
+
+        // Don't even start the search if it cannot possibly succeed
+        if !self.can_succeed() {
+            return false;
+        }
+
+        // Create a branch point for the current state
+        let initial_state = self.start_branch();
+
+        // As long as we still have branches to explore, do it.
+        while let Some((cherry, first_leaf)) = self.next_branch() {
+
+            let cherry = self.remove_cherry(cherry::Ref::NonTrivial(cherry));
+            let (u, v) = cherry.leaves();
+            let (u, v) = if first_leaf {
+                (u, v)
+            } else {
+                (v, u)
+            };
+
+            // Cutting u is allowed only if v has not been cut yet.
+            if self.state.leaf(v).num_occurrences() == self.state.num_trees() {
+
+                // Record the tree-child pair and cut u in all trees that have the cherry (u, v)
+                self.increase_weight();
+                self.push_tree_child_pair(u, v);
+                for tree in cherry.trees() {
+                    self.prune_leaf(u, *tree);
+                }
+
+                // Resolve all non-trivial-cherries this has created
+                self.resolve_trivial_cherries();
+
+                // If we're done now, we've found a solution
+                if self.search_is_done() {
+                    return true;
+                }
+
+                // If we can still succeed, then create a new branch point for the current state
+                if  self.can_succeed() {
+                    self.start_branch();
+                }
             }
         }
+
+        // We've explored all options without finding a solution
+        self.rewind_to_snapshot(initial_state);
+        false
     }
 
     /// Eliminate all trivial cherries in the current search state.
@@ -1131,9 +1202,9 @@ mod tests {
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick3_restored.clone()));
     }
 
-    /// Test successful recurse with parameter 0
+    /// Test successful search with parameter 0
     #[test]
-    fn recurse_0_success() {
+    fn search_0_success() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,g),(b,(c,e)));\n";
@@ -1142,7 +1213,8 @@ mod tests {
             builder.trees()
         };
         let mut search = Search::new(trees);
-        assert!(search.recurse());
+        search.resolve_trivial_cherries();
+        assert!(search.search_is_done());
         let seq = search.state.tc_seq();
         assert_eq!(seq.len(), 5);
         let mut string = String::new();
@@ -1160,9 +1232,9 @@ mod tests {
         assert_eq!(string, "<(c, e), (b, e), (a, g), (g, e), (e, -)>");
     }
 
-    /// Test unsuccessful recurse with parameter 0
+    /// Test unsuccessful search with parameter 0
     #[test]
-    fn recurse_0_fail() {
+    fn search_0_fail() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,b),c);\n(a,(b,c));\n";
@@ -1170,12 +1242,13 @@ mod tests {
             builder.trees()
         };
         let mut search = Search::new(trees);
-        assert!(!search.recurse());
+        search.resolve_trivial_cherries();
+        assert!(!search.search());
     }
 
-    /// Test successful recurse with parameter 1
+    /// Test successful search with parameter 1
     #[test]
-    fn recurse_1_success() {
+    fn search_1_success() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,b),c);\n(a,(b,c));\n";
@@ -1183,8 +1256,9 @@ mod tests {
             builder.trees()
         };
         let mut search = Search::new(trees);
+        search.resolve_trivial_cherries();
         search.state.increase_max_weight();
-        assert!(search.recurse());
+        assert!(search.search());
         let seq = search.state.tc_seq();
         assert_eq!(seq.len(), 4);
         let mut string = String::new();
@@ -1202,9 +1276,9 @@ mod tests {
         assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
     }
 
-    /// Test unsuccessful recurse with parameter 1
+    /// Test unsuccessful search with parameter 1
     #[test]
-    fn recurse_1_fail() {
+    fn search_1_fail() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "(a,((b,(c,d)),e));\n((a,b),((c,d),e));\n((a,b),(c,(d,e)));\n(a,((b,c),(d,e)));\n";
@@ -1212,13 +1286,14 @@ mod tests {
             builder.trees()
         };
         let mut search = Search::new(trees);
+        search.resolve_trivial_cherries();
         search.state.increase_max_weight();
-        assert!(!search.recurse());
+        assert!(!search.search());
     }
 
-    /// Test successful recurse with parameter 2
+    /// Test successful search with parameter 2
     #[test]
-    fn recurse_2_success() {
+    fn search_2_success() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "(a,((b,(c,d)),e));\n((a,b),((c,d),e));\n((a,b),(c,(d,e)));\n(a,((b,c),(d,e)));\n";
@@ -1228,7 +1303,8 @@ mod tests {
         let mut search = Search::new(trees);
         search.state.increase_max_weight();
         search.state.increase_max_weight();
-        assert!(search.recurse());
+        search.resolve_trivial_cherries();
+        assert!(search.search());
         let seq = search.state.tc_seq();
         assert_eq!(seq.len(), 7);
         let mut string = String::new();
@@ -1243,7 +1319,7 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+        assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
     }
 
     /// Test run
@@ -1270,6 +1346,6 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
-        assert_eq!(string, "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+        assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
     }
 }
