@@ -6,6 +6,7 @@ use super::super::{Pair, TcSeq};
 use tree::{Tree, Leaf, Node};
 
 /// The state of the search for a tree-child sequence
+#[derive(Clone)]
 pub struct State<T> {
 
     /// The trees for which to find a TC sequence

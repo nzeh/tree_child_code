@@ -4,6 +4,7 @@ use super::cherry;
 use tree::{Leaf, Node};
 
 /// The history of operations applied to produce the current set of trees
+#[derive(Clone)]
 pub struct History(Vec<Op>);
 
 

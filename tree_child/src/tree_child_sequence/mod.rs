@@ -4,10 +4,12 @@
 use std::fmt;
 use tree::Tree;
 
+mod master;
+mod worker;
 mod search;
 
 /// An entry in a tree-child sequence
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Pair<T> {
 
     /// A pair (x, y) that eliminates x from every tree that has (x, y) as a cherry
@@ -27,7 +29,7 @@ pub fn tree_child_sequence<T: Clone>(
     trees:                    Vec<Tree<T>>,
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
-    search::Search::new(trees, limit_fanout, use_redundant_branch_opt).run()
+    master::Master::new(trees, limit_fanout, use_redundant_branch_opt).run()
 }
 
 /// Let's make pairs printable
