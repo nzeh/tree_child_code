@@ -329,6 +329,20 @@ impl<T: Clone> State<T> {
         self.leaf_mut(leaf).add_cherry(cherry_ref);
     }
 
+    /// Record the cutting of a leaf from a cherry
+    pub fn cut(&mut self, cherry_ref: cherry::Ref, first_leaf: bool) -> usize {
+        let cherry    = self.cherry_mut(cherry_ref);
+        let cut_count = cherry.cut_count(first_leaf);
+        cherry.cut(first_leaf);
+        return cut_count;
+    }
+
+    /// Restore the cut count of a leaf in a cherry
+    pub fn restore_cut_count(&mut self, cherry_ref: cherry::Ref, first_leaf: bool, cut_count: usize) {
+        let cherry = self.cherry_mut(cherry_ref);
+        cherry.set_cut_count(first_leaf, cut_count);
+    }
+
     //----------------------------------------------------------------------------------------------
     // Primitives to manipulate the trees
     //----------------------------------------------------------------------------------------------

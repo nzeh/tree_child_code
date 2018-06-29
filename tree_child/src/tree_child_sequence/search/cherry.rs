@@ -21,6 +21,13 @@ pub struct Cherry {
 
     /// The trees that have this cherry
     trees: Vec<usize>,
+
+    /// The number of trees that contained this cherry the last time we cut u
+    u_trees_cut: usize,
+
+    /// The number of trees that contained this cherry the last time we cut v
+    v_trees_cut: usize,
+
 }
 
 /// Reference to a cherry
@@ -35,7 +42,14 @@ impl Cherry {
 
     /// Create a new cherry first found in `tree`
     pub fn new(u: Leaf, v: Leaf, tree: usize) -> Cherry {
-        Cherry { u, v, uix: 0, vix: 0, trees: vec![tree] }
+        Cherry {
+            u, v,
+            uix:         0,
+            vix:         0,
+            trees:       vec![tree],
+            u_trees_cut: 0,
+            v_trees_cut: 0,
+        }
     }
 
     /// Push a new tree to the list of trees that have this cherry
@@ -80,6 +94,30 @@ impl Cherry {
             self.uix = ix;
         } else {
             self.vix = ix;
+        }
+    }
+
+    /// Update the number of cuts for one of the leaves
+    pub fn cut(&mut self, first_leaf: bool) {
+        let count = self.num_occurrences();
+        self.set_cut_count(first_leaf, count);
+    }
+
+    /// Set the cut count for the given leaf
+    pub fn set_cut_count(&mut self, first_leaf: bool, count: usize) {
+        if first_leaf {
+            self.u_trees_cut = count;
+        } else {
+            self.v_trees_cut = count;
+        }
+    }
+
+    /// Query the number of leaves the given leaf was cut in
+    pub fn cut_count(&self, first_leaf: bool) -> usize {
+        if first_leaf {
+            self.u_trees_cut
+        } else {
+            self.v_trees_cut
         }
     }
 }
