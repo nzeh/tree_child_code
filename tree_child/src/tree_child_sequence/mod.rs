@@ -25,11 +25,11 @@ pub type TcSeq<T> = Vec<Pair<T>>;
 
 
 /// Compute a tree-child sequence for a given set of trees
-pub fn tree_child_sequence<T: Clone>(
+pub fn tree_child_sequence<T: Clone + Send + 'static>(
     trees:                    Vec<Tree<T>>,
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
-    master::Master::new(trees, limit_fanout, use_redundant_branch_opt).run()
+    master::Master::new(trees, 1, limit_fanout, use_redundant_branch_opt).run()
 }
 
 /// Let's make pairs printable

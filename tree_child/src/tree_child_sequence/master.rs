@@ -1,39 +1,61 @@
+use std::mem;
+use std::sync::{Arc, RwLock};
+use std::sync::mpsc::{Receiver, channel};
 use super::TcSeq;
 use super::search::Search;
 use super::worker::Worker;
 use super::super::tree::Tree;
 
-/// Implementation of the master thread
+/// The master thread
 pub struct Master<T> {
 
-    /// For now we have just one worker
+    /// The problem instance to be solved
     search: Search<T>,
+
+    /// The worker threads controlled by this master,
+    workers: Vec<Worker<T>>,
+
+    /// The idle queue
+    waiting: Arc<RwLock<Vec<usize>>>,
+
+    /// The queue used to receive messages from the workers
+    queue: Receiver<Option<TcSeq<T>>>,
 }
 
-impl<T: Clone> Master<T> {
+impl<T: Clone + Send + 'static> Master<T> {
 
-    /// Create a new master
-    pub fn new(trees: Vec<Tree<T>>, limit_fanout: bool, use_rendundant_branch_opt: bool) -> Self {
-        let mut search = Search::new(trees, limit_fanout, use_rendundant_branch_opt);
-        search.resolve_trivial_cherries();
-        Master { search }
+    /// Initialize the master
+    pub fn new(trees: Vec<Tree<T>>, num_workers: usize, limit_fanout: bool, use_rendundant_branch_opt: bool) -> Self {
+        let search             = Search::new(trees, limit_fanout, use_rendundant_branch_opt);
+        let (sender, receiver) = channel();
+        let waiting            = Arc::new(RwLock::new(vec![]));
+        let workers            = (0..num_workers).map(|i| Worker::new(i, num_workers, waiting.clone(), sender.clone())).collect();
+        Master { search, workers, waiting, queue: receiver }
     }
 
-    /// Run the master
+    /// Run the master thread
     pub fn run(mut self) -> TcSeq<T> {
-        if self.search.success() {
-            // No need to spawn any workers; the input is trivial.
-            return self.search.tc_seq().unwrap();
-        } else {
-            // We actually need to search for a solution
-            loop {
-                // Try to find a sequence for the next higher max_weight
-                self.search.increase_max_weight();
-                // If the worker succeeded, return its solution
-                if let Some(seq) = Worker::new(self.search.clone()).run() {
-                    return seq;
-                }
+        self.search.resolve_trivial_cherries();
+        loop {
+            match self.queue.recv().unwrap() {
+                Some(seq) => { self.stop_workers(); return seq; },
+                None      => self.start_new_search(),
             }
+        }
+    }
+
+    /// Start a new search
+    fn start_new_search(&mut self) {
+        self.search.increase_max_weight();
+        let worker = self.waiting.write().unwrap().pop().unwrap();
+        self.workers[worker].work_on(self.search.clone());
+    }
+
+    /// Stop all workers
+    fn stop_workers(&mut self) {
+        let workers = mem::replace(&mut self.workers, vec![]);
+        for worker in workers {
+            worker.quit();
         }
     }
 }
@@ -55,7 +77,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let master = Master::new(trees, true, true);
+        let master = Master::new(trees, 32, true, true);
         let seq = master.run();
         assert_eq!(seq.len(), 7);
         let mut string = String::new();
