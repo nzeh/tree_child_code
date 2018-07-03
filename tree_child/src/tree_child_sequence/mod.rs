@@ -42,3 +42,37 @@ impl<T: fmt::Display> fmt::Display for Pair<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use newick;
+    use std::fmt::Write;
+    use tree::TreeBuilder;
+
+    /// Test tree_child_sequence
+    #[test]
+    fn tree_child_sequence() {
+        let trees = {
+            let mut builder = TreeBuilder::<String>::new();
+            let newick = "(a,((b,(c,d)),e));\n((a,b),((c,d),e));\n((a,b),(c,(d,e)));\n(a,((b,c),(d,e)));\n";
+            newick::parse_forest(&mut builder, newick).unwrap();
+            builder.trees()
+        };
+        let seq = super::tree_child_sequence(trees, true, true);
+        assert_eq!(seq.len(), 7);
+        let mut string = String::new();
+        let mut first = true;
+        write!(&mut string, "<").unwrap();
+        for pair in seq {
+            if first {
+                first = false;
+            } else {
+                write!(&mut string, ", ").unwrap();
+            }
+            write!(&mut string, "{}", pair).unwrap();
+        }
+        write!(&mut string, ">").unwrap();
+        assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+    }
+}

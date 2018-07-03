@@ -74,6 +74,9 @@ impl<T: Clone> WorkerState<T> {
 
     /// Run a search and return the result
     fn run_search(&self, mut search: Search<T>) -> Option<TcSeq<T>> {
+        if search.success() {
+            return search.tc_seq();
+        }
         if search.can_succeed() {
             search.start_branch();
             while search.branch() {}
