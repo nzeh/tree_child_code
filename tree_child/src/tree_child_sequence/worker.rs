@@ -23,6 +23,9 @@ struct WorkerState<T> {
     /// The total number of workers
     num_workers: usize,
 
+    /// The number of search iterations to execute before checking for idle threads
+    poll_delay: Option<usize>,
+
     /// The idle queue
     waiting: Arc<RwLock<Vec<usize>>>,
 
@@ -46,9 +49,10 @@ pub enum FromWorker<T> {
 impl<T: Clone + Send + 'static> Worker<T> {
 
     /// Create a new worker
-    pub fn new(id: usize, num_workers: usize, waiting: Arc<RwLock<Vec<usize>>>, result: Sender<FromWorker<T>>) -> Self {
+    pub fn new(id: usize, num_workers: usize, poll_delay: Option<usize>, waiting:
+               Arc<RwLock<Vec<usize>>>, result: Sender<FromWorker<T>>) -> Self {
         let (queue, work) = channel();
-        let worker_state = WorkerState { id, num_workers, waiting, work, result };
+        let worker_state = WorkerState { id, num_workers, poll_delay, waiting, work, result };
         let thread = thread::spawn(move || worker_state.run());
         Worker { thread, queue }
     }
@@ -88,17 +92,26 @@ impl<T: Clone> WorkerState<T> {
         }
         if search.can_succeed() {
             search.start_branch();
-            while search.branch() {
-                if self.waiting.read().unwrap().len() > 0 {
-                    let recipient = self.waiting.write().unwrap().pop();
-                    if let Some(recipient) = recipient {
-                        if let Some(other_search) = search.split() {
-                            self.share_work(recipient, other_search);
-                        } else {
-                            self.waiting.write().unwrap().push(recipient);
+            if let Some(poll_delay) = self.poll_delay {
+                'l: loop {
+                    for _ in 0..poll_delay {
+                        if !search.branch() {
+                            break 'l
+                        }
+                    }
+                    if self.waiting.read().unwrap().len() > 0 {
+                        let recipient = self.waiting.write().unwrap().pop();
+                        if let Some(recipient) = recipient {
+                            if let Some(other_search) = search.split() {
+                                self.share_work(recipient, other_search);
+                            } else {
+                                self.waiting.write().unwrap().push(recipient);
+                            }
                         }
                     }
                 }
+            } else {
+                while search.branch() {}
             }
             if let Some(seq) = search.tc_seq() {
                 return Some(seq);
@@ -139,7 +152,7 @@ mod tests {
         let (sender, receiver)          = channel();
         let waiting                     = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<usize>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
+            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
@@ -197,7 +210,7 @@ mod tests {
         let (sender, receiver)           = channel();
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
+            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
@@ -239,7 +252,7 @@ mod tests {
         let (sender, receiver)           = channel();
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
+            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
@@ -295,7 +308,7 @@ mod tests {
         let (sender, receiver)           = channel();
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
+            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
@@ -338,7 +351,7 @@ mod tests {
         let (sender, receiver)           = channel();
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
+            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),

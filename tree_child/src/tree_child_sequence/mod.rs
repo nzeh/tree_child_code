@@ -27,9 +27,11 @@ pub type TcSeq<T> = Vec<Pair<T>>;
 /// Compute a tree-child sequence for a given set of trees
 pub fn tree_child_sequence<T: Clone + Send + 'static>(
     trees:                    Vec<Tree<T>>,
+    num_threads:              usize,
+    poll_delay:               Option<usize>,
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
-    master::Master::new(trees, 8, limit_fanout, use_redundant_branch_opt).run()
+    master::Master::new(trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt).run()
 }
 
 /// Let's make pairs printable
@@ -59,7 +61,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let seq = super::tree_child_sequence(trees, true, true);
+        let seq = super::tree_child_sequence(trees, 32, Some(1), true, true);
         assert_eq!(seq.len(), 7);
         let mut string = String::new();
         let mut first = true;

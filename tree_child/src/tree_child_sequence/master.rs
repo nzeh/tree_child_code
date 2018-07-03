@@ -25,11 +25,14 @@ pub struct Master<T> {
 impl<T: Clone + Send + 'static> Master<T> {
 
     /// Initialize the master
-    pub fn new(trees: Vec<Tree<T>>, num_workers: usize, limit_fanout: bool, use_rendundant_branch_opt: bool) -> Self {
+    pub fn new(trees: Vec<Tree<T>>, num_workers: usize, poll_delay: Option<usize>,
+               limit_fanout: bool, use_rendundant_branch_opt: bool) -> Self {
         let search             = Search::new(trees, limit_fanout, use_rendundant_branch_opt);
         let (sender, receiver) = channel();
         let waiting            = Arc::new(RwLock::new(vec![]));
-        let workers            = (0..num_workers).map(|i| Worker::new(i, num_workers, waiting.clone(), sender.clone())).collect();
+        let workers            = (0..num_workers).map(|i| Worker::new(i, num_workers, poll_delay,
+                                                                      waiting.clone(),
+                                                                      sender.clone())).collect();
         Master { search, workers, waiting, queue: receiver }
     }
 
@@ -78,7 +81,7 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let master = Master::new(trees, 32, true, true);
+        let master = Master::new(trees, 32, Some(1), true, true);
         let seq = master.run();
         assert_eq!(seq.len(), 7);
         let mut string = String::new();

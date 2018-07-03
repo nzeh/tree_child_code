@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate clap;
+extern crate num_cpus;
 extern crate tree_child;
 
 use std::fmt;
@@ -47,6 +48,68 @@ impl fmt::Display for AppError {
 /// A result type whose error type is Error
 type Result<T> = std::result::Result<T, AppError>;
 
+/// Check that the provided number of threads is valid
+fn validate_num_threads(arg: String) -> std::result::Result<(), String> {
+    if arg.to_lowercase() == "native" {
+        Ok(())
+    } else {
+        match arg.parse::<usize>() {
+            Ok(x) => if x > 0 {
+                Ok(())
+            } else {
+                Err(String::from("Number of threads must be \"native\" or a positive integer"))
+            },
+            Err(_) => Err(String::from("Number of threads must be \"native\" or a positive integer")),
+        }
+    }
+}
+
+/// Query the number of threads to use
+fn num_threads(arg: Option<&str>) -> usize {
+    if let Some(arg) = arg {
+        if arg.to_lowercase() == "native" {
+            num_cpus::get()
+        } else {
+            arg.parse::<usize>().unwrap()
+        }
+    } else {
+        1
+    }
+}
+
+/// Check that the poll delay is valid
+fn validate_poll_delay(arg: String) -> std::result::Result<(), String> {
+    if arg.to_lowercase() == "infinite" {
+        Ok(())
+    } else {
+        match arg.parse::<usize>() {
+            Ok(x) => if x > 0 {
+                Ok(())
+            } else {
+                Err(String::from("Poll delay must be \"infinite\" or a positive integer"))
+            },
+            Err(_) => Err(String::from("Poll delay must be \"infinite\" or a positive integer")),
+        }
+    }
+}
+
+/// Query the poll delay to use
+fn poll_delay(arg: Option<&str>, num_threads: usize) -> Option<usize> {
+    if let Some(arg) = arg {
+        if arg.to_lowercase() == "infinite" {
+            None
+        } else {
+            Some(arg.parse::<usize>().unwrap())
+        }
+    } else {
+        if num_threads == 1 {
+            None
+        } else {
+            Some(1)
+        }
+    }
+}
+
 /// Main function
 fn main() {
     let args = clap_app!(
@@ -61,6 +124,13 @@ fn main() {
 (EXPERIMENTAL)")
         (@arg dont_limit_fanout: -b --("no-branch-bound") "Disable limiting the branching fan-out based on the
 hybridization number")
+        (@arg num_threads: -p --("num-threads") [n] {validate_num_threads} "the number of threads to use or \"native\" for the number
+of logical cores
+If this option is absent, the code runs using a single thread")
+        (@arg poll_delay: -w --("poll-delay") [n] {validate_poll_delay} "the number of branches each thread should explore between
+checks for idle threads or \"infinite\" to disable checking
+If this option is absent, this is equivalent to \"-w infinite\" if
+running single-threaded and to \"-w 1\" if running multi-threaded")
     ).get_matches();
 
     let input                    = args.value_of("input").unwrap();
@@ -68,6 +138,8 @@ hybridization number")
     let use_clustering           = !args.is_present("dont_use_clustering");
     let use_redundant_branch_opt = args.is_present("optimize_redundant_branches");
     let limit_fanout             = !args.is_present("dont_limit_fanout");
+    let num_threads              = num_threads(args.value_of("num_threads"));
+    let poll_delay               = poll_delay(args.value_of("poll_delay"), num_threads);
 
     let trees = match read_input(input) {
         Ok(trees) => trees,
@@ -80,10 +152,10 @@ hybridization number")
     let tc_seq = if use_clustering {
         let clusters = clusters::partition(trees);
         let seqs = clusters.into_iter().map(
-            |trees| tree_child_sequence(trees, limit_fanout, use_redundant_branch_opt)).collect();
+            |trees| tree_child_sequence(trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt)).collect();
         clusters::combine_tc_seqs(seqs)
     } else {
-        tree_child_sequence(trees, limit_fanout, use_redundant_branch_opt)
+        tree_child_sequence(trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt)
     };
 
     if let Err(e) = write_output(output, tc_seq) {
