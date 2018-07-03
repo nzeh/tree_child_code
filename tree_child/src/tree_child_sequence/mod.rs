@@ -29,7 +29,7 @@ pub fn tree_child_sequence<T: Clone + Send + 'static>(
     trees:                    Vec<Tree<T>>,
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
-    master::Master::new(trees, 1, limit_fanout, use_redundant_branch_opt).run()
+    master::Master::new(trees, 8, limit_fanout, use_redundant_branch_opt).run()
 }
 
 /// Let's make pairs printable

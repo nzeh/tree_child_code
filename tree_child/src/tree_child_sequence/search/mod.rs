@@ -78,17 +78,14 @@ impl<T: Clone> Search<T> {
 
     /// Split off part of the work of this search into a new instance
     pub fn split(&mut self) -> Option<Self> {
-        if self.stack.is_empty() {
-            None
-        } else {
+        while !self.stack.is_empty() {
             let mut other_search = self.clone();
             self.skip_next_top_branch();
             if other_search.limit_to_next_top_branch() {
-                Some(other_search)
-            } else {
-                None
+                return Some(other_search);
             }
         }
+        None
     }
 
     /// Make sure this search does not follow the next available branch at the topmost branch point
@@ -110,7 +107,7 @@ impl<T: Clone> Search<T> {
         self.branch();
         self.history.clear();
         if self.stack.len() > 1 {
-            self.stack.pop_front();
+            self.stack.clear();
             true
         } else {
             false
@@ -157,39 +154,40 @@ impl<T: Clone> Search<T> {
     pub fn branch(&mut self) -> bool {
 
         // Get the next branch to explore
-        let (cherry, first_leaf, cut_count) = self.next_branch_not_skipped();
+        if let Some((cherry, first_leaf, cut_count)) = self.next_branch_not_skipped() {
 
-        // Order the leaves of the cherry so we cut the right leaf
-        let (u, v) = cherry.leaves();
-        let (u, v) = if first_leaf {
-            (u, v)
-        } else {
-            (v, u)
-        };
+            // Order the leaves of the cherry so we cut the right leaf
+            let (u, v) = cherry.leaves();
+            let (u, v) = if first_leaf {
+                (u, v)
+            } else {
+                (v, u)
+            };
 
-        // Cutting u is allowed only if v has not been cut yet and necessary only if u has not
-        // been cut in all trees of the current cherry yet.
-        if  self.state.leaf(v).num_occurrences() == self.state.num_trees() &&
-            (!self.use_redundant_branch_opt || cut_count < cherry.num_occurrences()) {
+            // Cutting u is allowed only if v has not been cut yet and necessary only if u has not
+            // been cut in all trees of the current cherry yet.
+            if  self.state.leaf(v).num_occurrences() == self.state.num_trees() &&
+                (!self.use_redundant_branch_opt || cut_count < cherry.num_occurrences()) {
 
-            // Record the tree-child pair and cut u in all trees that have the cherry (u, v)
-            self.increase_weight();
-            self.push_tree_child_pair(u, v);
-            for tree in cherry.trees() {
-                self.prune_leaf(u, *tree);
-            }
+                // Record the tree-child pair and cut u in all trees that have the cherry (u, v)
+                self.increase_weight();
+                self.push_tree_child_pair(u, v);
+                for tree in cherry.trees() {
+                    self.prune_leaf(u, *tree);
+                }
 
-            // Resolve all non-trivial-cherries this has created
-            self.resolve_trivial_cherries();
+                // Resolve all non-trivial-cherries this has created
+                self.resolve_trivial_cherries();
 
-            // If we found a solution, terminate the search
-            if self.success() {
-                return false;
-            }
+                // If we found a solution, terminate the search
+                if self.success() {
+                    return false;
+                }
 
-            // If we can still succeed, then create a new branch point for the current state
-            if  self.can_succeed() {
-                self.start_branch();
+                // If we can still succeed, then create a new branch point for the current state
+                if  self.can_succeed() {
+                    self.start_branch();
+                }
             }
         }
 
@@ -198,7 +196,12 @@ impl<T: Clone> Search<T> {
     }
 
     /// Get the next branch that should not be skipped
-    fn next_branch_not_skipped(&mut self) -> (cherry::Cherry, bool, usize) {
+    fn next_branch_not_skipped(&mut self) -> Option<(cherry::Cherry, bool, usize)> {
+
+        if self.stack.is_empty() {
+            return None;
+        }
+
         let (snapshot, num_skipped_branches) = {
             let branch_point = self.stack.back().unwrap();
             (branch_point.snapshot, branch_point.num_skipped_branches)
@@ -216,11 +219,12 @@ impl<T: Clone> Search<T> {
         self.stack.back_mut().unwrap().num_skipped_branches = 0;
 
         // The next branch is the one that we should recurse into
-        self.next_branch()
+        let (cherry, first_leaf, cut_count) = self.next_branch();
+        Some((self.remove_cherry(cherry::Ref::NonTrivial(cherry)), first_leaf, cut_count))
     }
 
     /// Get the next branch to evaluate or skip
-    fn next_branch(&mut self) -> (cherry::Cherry, bool, usize) {
+    fn next_branch(&mut self) -> (usize, bool, usize) {
         let (cherry, first_leaf, num_branches_left) = {
             let branch_point = self.stack.back().unwrap();
             (branch_point.cherry, branch_point.first_leaf, branch_point.num_branches_left)
@@ -249,7 +253,7 @@ impl<T: Clone> Search<T> {
 
         // Now return the cherry to branch on, whether to branch on the first leaf and that
         // leaf's cut count
-        (self.remove_cherry(cherry::Ref::NonTrivial(cherry)), first_leaf, cut_count)
+        (cherry, first_leaf, cut_count)
     }
 
     /// Eliminate all trivial cherries in the current search state.

@@ -30,14 +30,23 @@ struct WorkerState<T> {
     work: Receiver<Option<Search<T>>>,
 
     /// The queue used to send results back to the master
-    result: Sender<Option<TcSeq<T>>>,
+    result: Sender<FromWorker<T>>,
 }
 
+/// The type of message a worker sends to the master
+pub enum FromWorker<T> {
+
+    /// The result of a computation
+    Result(Option<TcSeq<T>>),
+
+    /// Part of the work this worker is ready to share with another worker
+    WorkPackage(usize, Search<T>),
+}
 
 impl<T: Clone + Send + 'static> Worker<T> {
 
     /// Create a new worker
-    pub fn new(id: usize, num_workers: usize, waiting: Arc<RwLock<Vec<usize>>>, result: Sender<Option<TcSeq<T>>>) -> Self {
+    pub fn new(id: usize, num_workers: usize, waiting: Arc<RwLock<Vec<usize>>>, result: Sender<FromWorker<T>>) -> Self {
         let (queue, work) = channel();
         let worker_state = WorkerState { id, num_workers, waiting, work, result };
         let thread = thread::spawn(move || worker_state.run());
@@ -79,7 +88,18 @@ impl<T: Clone> WorkerState<T> {
         }
         if search.can_succeed() {
             search.start_branch();
-            while search.branch() {}
+            while search.branch() {
+                if self.waiting.read().unwrap().len() > 0 {
+                    let recipient = self.waiting.write().unwrap().pop();
+                    if let Some(recipient) = recipient {
+                        if let Some(other_search) = search.split() {
+                            self.share_work(recipient, other_search);
+                        } else {
+                            self.waiting.write().unwrap().push(recipient);
+                        }
+                    }
+                }
+            }
             if let Some(seq) = search.tc_seq() {
                 return Some(seq);
             }
@@ -92,10 +112,15 @@ impl<T: Clone> WorkerState<T> {
         let mut waiting = self.waiting.write().unwrap();
         waiting.push(self.id);
         if result.is_some() {
-            self.result.send(result).unwrap();
+            self.result.send(FromWorker::Result(result)).unwrap();
         } if waiting.len() == self.num_workers {
-            self.result.send(None).unwrap();
+            self.result.send(FromWorker::Result(None)).unwrap();
         }
+    }
+
+    /// Send part of my workload to another worker
+    fn share_work(&self, recipient: usize, search: Search<T>) {
+        self.result.send(FromWorker::WorkPackage(recipient, search)).unwrap();
     }
 }
 
@@ -115,8 +140,10 @@ mod tests {
         let waiting                     = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<usize>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
-        let msg                         = receiver.recv().unwrap();
-        assert_eq!(msg, None);
+        match receiver.recv().unwrap() {
+            FromWorker::Result(res) => assert!(res.is_none()),
+            _                       => panic!("Expected a result, not a workload"),
+        }
         for worker in workers {
             worker.quit();
         }
@@ -171,14 +198,25 @@ mod tests {
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
-        let first_msg                    = receiver.recv().unwrap();
-        assert_eq!(first_msg, None);
+        match receiver.recv().unwrap() {
+            FromWorker::Result(res) => assert!(res.is_none()),
+            _                       => panic!("Expected a result, not a workload"),
+        }
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
-        let second_msg                   = receiver.recv().unwrap();
-        assert_eq!(second_msg, None);
-        for worker in workers {
-            worker.quit();
+        loop {
+            match receiver.recv().unwrap() {
+                FromWorker::Result(None) => {
+                    for worker in workers {
+                        worker.quit();
+                    }
+                    return;
+                },
+                FromWorker::Result(Some(_)) => {
+                    panic!("search_0_fail should have failed");
+                },
+                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+            }
         }
     }
 
@@ -202,31 +240,39 @@ mod tests {
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
-        let first_msg                    = receiver.recv().unwrap();
-        assert_eq!(first_msg, None);
+        match receiver.recv().unwrap() {
+            FromWorker::Result(res) => assert!(res.is_none()),
+            _                       => panic!("Expected a result, not a workload"),
+        }
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
-        let second_msg                   = receiver.recv().unwrap();
-        for worker in workers {
-            worker.quit();
-        }
-        if let Some(seq) = second_msg {
-            assert_eq!(seq.len(), 4);
-            let mut string = String::new();
-            let mut first = true;
-            write!(&mut string, "<").unwrap();
-            for pair in seq {
-                if first {
-                    first = false;
-                } else {
-                    write!(&mut string, ", ").unwrap();
-                }
-                write!(&mut string, "{}", pair).unwrap();
+        loop {
+            match receiver.recv().unwrap() {
+                FromWorker::Result(Some(seq)) => {
+                    for worker in workers {
+                        worker.quit();
+                    }
+                    assert_eq!(seq.len(), 4);
+                    let mut string = String::new();
+                    let mut first = true;
+                    write!(&mut string, "<").unwrap();
+                    for pair in seq {
+                        if first {
+                            first = false;
+                        } else {
+                            write!(&mut string, ", ").unwrap();
+                        }
+                        write!(&mut string, "{}", pair).unwrap();
+                    }
+                    write!(&mut string, ">").unwrap();
+                    assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
+                    return;
+                },
+                FromWorker::Result(None) => {
+                    panic!("search_1_success should have succeeded");
+                },
+                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
             }
-            write!(&mut string, ">").unwrap();
-            assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
-        } else {
-            panic!("Search should have succeeded but failed");
         }
     }
 
@@ -250,14 +296,25 @@ mod tests {
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
-        let first_msg                    = receiver.recv().unwrap();
-        assert_eq!(first_msg, None);
+        match receiver.recv().unwrap() {
+            FromWorker::Result(res) => assert!(res.is_none()),
+            _                       => panic!("Expected a result, not a workload"),
+        }
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
-        let second_msg                   = receiver.recv().unwrap();
-        assert_eq!(second_msg, None);
-        for worker in workers {
-            worker.quit();
+        loop {
+            match receiver.recv().unwrap() {
+                FromWorker::Result(None) => {
+                    for worker in workers {
+                        worker.quit();
+                    }
+                    return;
+                },
+                FromWorker::Result(Some(_)) => {
+                    panic!("search_1_fail should have failed");
+                },
+                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+            }
         }
     }
 
@@ -282,31 +339,39 @@ mod tests {
         let waiting                      = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, waiting.clone(), sender.clone())).collect();
-        let first_msg                    = receiver.recv().unwrap();
-        assert_eq!(first_msg, None);
+        match receiver.recv().unwrap() {
+            FromWorker::Result(res) => assert!(res.is_none()),
+            _                       => panic!("Expected a result, not a workload"),
+        }
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
-        let second_msg                   = receiver.recv().unwrap();
-        for worker in workers {
-            worker.quit();
-        }
-        if let Some(seq) = second_msg {
-            assert_eq!(seq.len(), 7);
-            let mut string = String::new();
-            let mut first = true;
-            write!(&mut string, "<").unwrap();
-            for pair in seq {
-                if first {
-                    first = false;
-                } else {
-                    write!(&mut string, ", ").unwrap();
-                }
-                write!(&mut string, "{}", pair).unwrap();
+        loop {
+            match receiver.recv().unwrap() {
+                FromWorker::Result(Some(seq)) => {
+                    for worker in workers {
+                        worker.quit();
+                    }
+                    assert_eq!(seq.len(), 7);
+                    let mut string = String::new();
+                    let mut first = true;
+                    write!(&mut string, "<").unwrap();
+                    for pair in seq {
+                        if first {
+                            first = false;
+                        } else {
+                            write!(&mut string, ", ").unwrap();
+                        }
+                        write!(&mut string, "{}", pair).unwrap();
+                    }
+                    write!(&mut string, ">").unwrap();
+                    assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+                    return;
+                },
+                FromWorker::Result(None) => {
+                    panic!("search_1_success should have succeeded");
+                },
+                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
             }
-            write!(&mut string, ">").unwrap();
-            assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
-        } else {
-            panic!("Search should have succeeded but failed");
         }
     }
 }

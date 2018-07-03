@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{Receiver, channel};
 use super::TcSeq;
 use super::search::Search;
-use super::worker::Worker;
+use super::worker::{Worker, FromWorker};
 use super::super::tree::Tree;
 
 /// The master thread
@@ -19,7 +19,7 @@ pub struct Master<T> {
     waiting: Arc<RwLock<Vec<usize>>>,
 
     /// The queue used to receive messages from the workers
-    queue: Receiver<Option<TcSeq<T>>>,
+    queue: Receiver<FromWorker<T>>,
 }
 
 impl<T: Clone + Send + 'static> Master<T> {
@@ -38,8 +38,9 @@ impl<T: Clone + Send + 'static> Master<T> {
         self.search.resolve_trivial_cherries();
         loop {
             match self.queue.recv().unwrap() {
-                Some(seq) => { self.stop_workers(); return seq; },
-                None      => self.start_new_search(),
+                FromWorker::Result(Some(seq))              => { self.stop_workers(); return seq; },
+                FromWorker::Result(None)                   => self.start_new_search(),
+                FromWorker::WorkPackage(recipient, search) => self.workers[recipient].work_on(search),
             }
         }
     }
