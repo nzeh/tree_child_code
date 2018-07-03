@@ -33,6 +33,11 @@ impl History {
     pub fn take_snapshot(&self) -> Snapshot {
         Snapshot(self.0.len())
     }
+
+    /// Clear the history
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 

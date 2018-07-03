@@ -3,6 +3,7 @@ mod leaf;
 mod history;
 mod state;
 
+use std::collections::VecDeque;
 use tree::{Tree, Leaf, Node};
 use self::history::{History, Op, Snapshot};
 use self::state::State;
@@ -19,7 +20,7 @@ pub struct Search<T> {
     history: History,
 
     /// Recursion stack
-    stack: Vec<BranchPoint>,
+    stack: VecDeque<BranchPoint>,
 
     /// Was the search successful?
     success: bool,
@@ -45,6 +46,12 @@ struct BranchPoint {
 
     /// Are we branching on the first leaf of the cherry?
     first_leaf: bool,
+
+    /// Number of branches left to explore
+    num_branches_left: usize,
+
+    /// Number of branches that were moved to other threads
+    num_skipped_branches: usize,
 }
 
 impl<T: Clone> Search<T> {
@@ -58,10 +65,55 @@ impl<T: Clone> Search<T> {
         Search {
             state:   State::new(trees),
             history: History::new(),
-            stack:   Vec::new(),
+            stack:   VecDeque::new(),
             success: false,
             limit_fanout,
             use_redundant_branch_opt,
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // Code for splitting off part of the work in this instance into a new instance
+    //----------------------------------------------------------------------------------------------
+
+    /// Split off part of the work of this search into a new instance
+    pub fn split(&mut self) -> Option<Self> {
+        if self.stack.is_empty() {
+            None
+        } else {
+            let mut other_search = self.clone();
+            self.skip_next_top_branch();
+            if other_search.limit_to_next_top_branch() {
+                Some(other_search)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Make sure this search does not follow the next available branch at the topmost branch point
+    fn skip_next_top_branch(&mut self) {
+        let all_branches_skipped = {
+            let top_branch = &mut self.stack[0];
+            top_branch.num_skipped_branches += 1;
+            top_branch.num_skipped_branches == top_branch.num_branches_left
+        };
+        if all_branches_skipped {
+            self.stack.pop_front();
+        }
+    }
+
+    /// Rewind this search to its topmost branch point and limit the search to the next available
+    /// branch at this branch point
+    fn limit_to_next_top_branch(&mut self) -> bool {
+        self.stack.truncate(1);
+        self.branch();
+        self.history.clear();
+        if self.stack.len() > 1 {
+            self.stack.pop_front();
+            true
+        } else {
+            false
         }
     }
 
@@ -89,11 +141,14 @@ impl<T: Clone> Search<T> {
 
     /// Create a new branch point and return a snapshot of the state at the time of the branch
     pub fn start_branch(&mut self) -> Snapshot {
-        let snapshot = self.history.take_snapshot();
-        self.stack.push(BranchPoint {
+        let snapshot          = self.history.take_snapshot();
+        let num_branches_left = 2 * self.state.num_non_trivial_cherries();
+        self.stack.push_back(BranchPoint {
             snapshot,
-            cherry:     0,
-            first_leaf: true,
+            cherry:               0,
+            first_leaf:           true,
+            num_branches_left,
+            num_skipped_branches: 0,
         });
         snapshot
     }
@@ -102,7 +157,7 @@ impl<T: Clone> Search<T> {
     pub fn branch(&mut self) -> bool {
 
         // Get the next branch to explore
-        let (cherry, first_leaf, cut_count) = self.next_branch();
+        let (cherry, first_leaf, cut_count) = self.next_branch_not_skipped();
 
         // Order the leaves of the cherry so we cut the right leaf
         let (u, v) = cherry.leaves();
@@ -142,38 +197,54 @@ impl<T: Clone> Search<T> {
         !self.stack.is_empty()
     }
 
-    /// Get the next branch to evaluate
-    fn next_branch(&mut self) -> (cherry::Cherry, bool, usize) {
-        let (snapshot, cherry, first_leaf) = {
-            let branch_point = self.stack.last().unwrap();
-            (branch_point.snapshot, branch_point.cherry, branch_point.first_leaf)
+    /// Get the next branch that should not be skipped
+    fn next_branch_not_skipped(&mut self) -> (cherry::Cherry, bool, usize) {
+        let (snapshot, num_skipped_branches) = {
+            let branch_point = self.stack.back().unwrap();
+            (branch_point.snapshot, branch_point.num_skipped_branches)
         };
 
         // Reset the state to the last snapshot at this branch point
         self.rewind_to_snapshot(snapshot);
 
-        // Now record that we're cutting the next leaf at this branch point and make sure next
+        // Skip over branches that were moved to other threads
+        for _ in 0..num_skipped_branches {
+            self.next_branch();
+        }
+
+        // We skipped all branches that should be skipped
+        self.stack.back_mut().unwrap().num_skipped_branches = 0;
+
+        // The next branch is the one that we should recurse into
+        self.next_branch()
+    }
+
+    /// Get the next branch to evaluate or skip
+    fn next_branch(&mut self) -> (cherry::Cherry, bool, usize) {
+        let (cherry, first_leaf, num_branches_left) = {
+            let branch_point = self.stack.back().unwrap();
+            (branch_point.cherry, branch_point.first_leaf, branch_point.num_branches_left)
+        };
+
+        // Record that we're cutting the next leaf at this branch point and make sure next
         // time we rewind we do not reset this cut count
         let cut_count = self.cut(cherry::Ref::NonTrivial(cherry), first_leaf);
         {
-            let branch_point = self.stack.last_mut().unwrap();
+            let branch_point = self.stack.back_mut().unwrap();
             branch_point.snapshot = self.history.take_snapshot();
         }
 
-        if first_leaf {
-            // If we're currently at the first leaf of the current cherry, the next branch
-            // needs to try the second leaf of the same cherry.
-            let branch_point = self.stack.last_mut().unwrap();
-            branch_point.first_leaf = false;
-        } else if cherry < self.state.num_non_trivial_cherries() - 1 {
-            // If we're already at the second leaf, the next option to try is the first leaf of
-            // the next cherry.
-            let branch_point = self.stack.last_mut().unwrap();
-            branch_point.first_leaf = true;
-            branch_point.cherry += 1;
+        if num_branches_left > 1 {
+            let branch_point = self.stack.back_mut().unwrap();
+            branch_point.num_branches_left -= 1;
+            if first_leaf {
+                branch_point.first_leaf = false;
+            } else {
+                branch_point.cherry += 1;
+                branch_point.first_leaf = true;
+            }
         } else {
-            // Otherwise, we're done with this branch point, so pop it.
-            self.stack.pop();
+            self.stack.pop_back();
         }
 
         // Now return the cherry to branch on, whether to branch on the first leaf and that
