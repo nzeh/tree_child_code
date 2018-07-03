@@ -4,6 +4,7 @@ use super::cherry;
 use tree::{Leaf, Node};
 
 /// The history of operations applied to produce the current set of trees
+#[derive(Clone)]
 pub struct History(Vec<Op>);
 
 
@@ -31,6 +32,11 @@ impl History {
     /// Take a snapshot of the current history state
     pub fn take_snapshot(&self) -> Snapshot {
         Snapshot(self.0.len())
+    }
+
+    /// Clear the history
+    pub fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
