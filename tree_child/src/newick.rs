@@ -325,7 +325,9 @@ pub fn format_forest<T: Clone + Display>(forest: &[Tree<T>]) -> Option<String> {
 /// Format a tree into a Newick string, held in a given string buffer
 fn format_one_tree<T: Clone + Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
 
-    fn visit_node<T: Clone + Display>(tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
+    fn visit_node<T: Clone + Display>(
+        tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
+
         if tree.is_leaf(node) {
             write!(newick, "{}", &tree.label(node)?).unwrap();
         } else {
@@ -360,7 +362,8 @@ mod tests {
     #[test]
     fn parse_tree_success() {
         let mut builder = TreeBuilder::new();
-        assert!(parse_tree(&mut builder, "(a,foo_bar$:432,((c,  d   )e:12  ,(  f,g,h)i,j));").is_ok());
+        assert!(
+            parse_tree(&mut builder, "(a,foo_bar$:432,((c,  d   )e:12  ,(  f,g,h)i,j));").is_ok());
         let trees = builder.trees();
         assert_eq!(trees.len(), 1);
         let newick = format_tree(&trees[0]).unwrap();

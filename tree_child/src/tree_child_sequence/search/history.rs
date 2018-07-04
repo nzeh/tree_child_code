@@ -1,3 +1,8 @@
+//! This module implements the search history.  By recording all operations we perform, we can
+//! restore the search to an earlier state by rewinding these operations.  This is the central
+//! mechanism we use to implement a branching search that does not make a copy of the current
+//! search state every time it makes a recursive call.
+
 use std::vec;
 
 use super::cherry;
@@ -7,6 +12,10 @@ use tree::{Leaf, Node};
 #[derive(Clone)]
 pub struct History(Vec<Op>);
 
+/// A snapshot of the current search state
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+#[derive(Clone, Copy)]
+pub struct Snapshot(usize);
 
 impl History {
 
@@ -20,7 +29,8 @@ impl History {
         self.0.push(op);
     }
 
-    /// An iterator over the operations to unwind
+    /// An iterator over the operations that need to be unwound in order to restore the given
+    /// snapshot
     pub fn rewind(&mut self, snapshot: Snapshot) -> vec::IntoIter<Op> {
         let mut ops = vec![];
         while self.0.len() > snapshot.0 {
@@ -41,7 +51,7 @@ impl History {
 }
 
 
-/// The operations we perform
+/// The operations that can be recorded in the history
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone)]
 pub enum Op {
@@ -52,10 +62,10 @@ pub enum Op {
     /// Remove a cherry from the end of the list of trivial cherries
     PopTrivialCherry(cherry::Cherry),
 
-    /// Remove a cherry from the list of trivial cherries
+    /// Remove a cherry from the given position in the list of trivial cherries
     RemoveTrivialCherry(usize, cherry::Cherry),
 
-    /// Remove a cherry from the list of non-trivial cherries
+    /// Remove a cherry from the given position in the list of non-trivial cherries
     RemoveNonTrivialCherry(usize, cherry::Cherry),
 
     /// Record a new cherry and remember which cherry took its place if it was moved from the
@@ -79,13 +89,6 @@ pub enum Op {
     /// and the original cut count before the cut.
     Cut(cherry::Ref, bool, usize),
 }
-
-
-/// A snapshot of the current search state
-#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
-#[derive(Clone, Copy)]
-pub struct Snapshot(usize);
-
 
 #[cfg(test)]
 pub mod tests {

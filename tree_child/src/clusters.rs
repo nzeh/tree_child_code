@@ -649,13 +649,23 @@ mod tests {
     /// Test that combining tree-child sequences works correctly
     #[test]
     fn combine_tc_seqs() {
-        let seq1 = vec![Pair::Reduce(LoC::Leaf(1), LoC::Leaf(2)), Pair::Reduce(LoC::Leaf(3), LoC::Leaf(4)), Pair::Final(LoC::Leaf(5))];
-        let seq2 = vec![Pair::Reduce(LoC::Leaf(6), LoC::Cluster(Cluster(0))), Pair::Final(LoC::Leaf(7))];
-        let seq3 = vec![Pair::Reduce(LoC::Leaf(8), LoC::Leaf(9)), Pair::Final(LoC::Cluster(Cluster(1)))];
-        let seq4 = vec![Pair::Reduce(LoC::Leaf(10), LoC::Leaf(11)), Pair::Reduce(LoC::Leaf(12), LoC::Leaf(13)), Pair::Final(LoC::Leaf(14))];
-        let seq5 = vec![Pair::Reduce(LoC::Cluster(Cluster(3)), LoC::Leaf(15)), Pair::Final(LoC::Cluster(Cluster(2)))];
+        let seq1 = vec![
+            Pair::Reduce(LoC::Leaf(1), LoC::Leaf(2)), Pair::Reduce(LoC::Leaf(3), LoC::Leaf(4)),
+            Pair::Final(LoC::Leaf(5))];
+        let seq2 = vec![
+            Pair::Reduce(LoC::Leaf(6), LoC::Cluster(Cluster(0))), Pair::Final(LoC::Leaf(7))];
+        let seq3 = vec![
+            Pair::Reduce(LoC::Leaf(8), LoC::Leaf(9)), Pair::Final(LoC::Cluster(Cluster(1)))];
+        let seq4 = vec![
+            Pair::Reduce(LoC::Leaf(10), LoC::Leaf(11)), Pair::Reduce(LoC::Leaf(12), LoC::Leaf(13)),
+            Pair::Final(LoC::Leaf(14))];
+        let seq5 = vec![
+            Pair::Reduce(LoC::Cluster(Cluster(3)), LoC::Leaf(15)),
+            Pair::Final(LoC::Cluster(Cluster(2)))];
         let seqs = vec![seq1, seq2, seq3, seq4, seq5];
-        let comb = vec![Pair::Reduce(1, 2), Pair::Reduce(3, 4), Pair::Reduce(6, 5), Pair::Reduce(8, 9), Pair::Reduce(10, 11), Pair::Reduce(12, 13),
+        let comb = vec![
+            Pair::Reduce(1, 2), Pair::Reduce(3, 4), Pair::Reduce(6, 5), Pair::Reduce(8, 9),
+            Pair::Reduce(10, 11), Pair::Reduce(12, 13),
         Pair::Reduce(14, 15), Pair::Final(7)];
         assert_eq!(super::combine_tc_seqs(seqs), comb);
     }

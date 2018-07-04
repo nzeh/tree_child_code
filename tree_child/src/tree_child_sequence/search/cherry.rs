@@ -1,3 +1,5 @@
+//! This module implements basic operations on cherries.
+
 use std::slice;
 
 use tree::Leaf;
@@ -34,7 +36,11 @@ pub struct Cherry {
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone, Copy)]
 pub enum Ref {
+
+    /// Reference to a cherry in the list of trivial cherries
     Trivial(usize),
+
+    /// Reference to a cherry in the list of non-trivial cherries
     NonTrivial(usize),
 }
 
@@ -97,7 +103,9 @@ impl Cherry {
         }
     }
 
-    /// Update the number of cuts for one of the leaves
+    /// Update the number of cuts for one of the leaves.  Since we cut the leaf in all trees that
+    /// have this cherry, the new cut count for this leaf is the number of occurrences of this
+    /// cherry.
     pub fn cut(&mut self, first_leaf: bool) {
         let count = self.num_occurrences();
         self.set_cut_count(first_leaf, count);

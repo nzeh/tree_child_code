@@ -1,3 +1,5 @@
+//! This module implements the ephemeral part of the search state.  No history is recorded.
+
 use std::cmp::min;
 use std::mem;
 use super::cherry;
@@ -18,16 +20,14 @@ pub struct State<T> {
     /// The information associated with the leaves during the search
     leaves: Vec<leaf::Leaf>,
 
-    /// The list of trivial cherries.  For each cherry, we store references to the leaves, along
-    /// with the entries in their cherry lists.
+    /// The list of trivial cherries
     trivial_cherries: Vec<cherry::Cherry>,
 
-    /// The list of non-trivial cherries.  For each cherry, we store references to the leaves,
-    /// along with the entries in their cherry lists.  We also store the number of trees that
-    /// contain each cherry to be able to check quickly when a cherry becomes trivial.
+    /// The list of non-trivial cherries
     non_trivial_cherries: Vec<cherry::Cherry>,
 
-    /// The maximum allowed weight of the constructed sequence
+    /// The maximum allowed weight of the constructed sequence.  (This is the parameter "k" in the
+    /// FPT formulation of the algorithm.)
     max_weight: usize,
 
     /// The weight of the current tree-child sequence
@@ -43,7 +43,7 @@ impl<T: Clone> State<T> {
     // Initialization code
     //----------------------------------------------------------------------------------------------
 
-    /// Create a new search state
+    /// Create a new search state for a given set of trees
     pub fn new(trees: Vec<Tree<T>>) -> Self {
 
         let num_leaves = trees[0].leaf_count();
@@ -92,6 +92,7 @@ impl<T: Clone> State<T> {
     // Increase the parameter for the current search
     //----------------------------------------------------------------------------------------------
 
+    /// Increase the parameter of the search
     pub fn increase_max_weight(&mut self) {
         self.max_weight += 1;
     }
@@ -100,9 +101,17 @@ impl<T: Clone> State<T> {
     // Primitives to manipulate the lists of cherries
     //----------------------------------------------------------------------------------------------
 
-    /// Record information about the given cherry (u, v) occurring in trees.
-    pub fn record_cherry(&mut self, u: Leaf, v: Leaf, tree: usize)
-        -> (cherry::Ref, Option<cherry::Ref>) {
+    /// Record a cherry (u, v) occurring in the given tree.  The return value is a reference to the
+    /// recorded cherry.  The recorded cherry is always added to the list of non-trivial cherries
+    /// first.  If it turns out to be a trivial cherry now, it is moved to the list of non-trivial
+    /// cherries.  In this case, the second part of the return value is a reference to the original
+    /// position of the cherry in the list of non-trivial cherries, in order to be able to restore
+    /// the cherry to this position when undoing the operation.
+    pub fn record_cherry(
+        &mut self,
+        u:    Leaf,
+        v:    Leaf,
+        tree: usize) -> (cherry::Ref, Option<cherry::Ref>) {
 
         // See whether we already have a cherry (u, v) on record
         let cherry_ref = self.leaf(u).cherries().find(|cherry_ref| {
@@ -134,12 +143,18 @@ impl<T: Clone> State<T> {
 
     /// Forget a cherry that was previously recorded
     pub fn forget_cherry(&mut self, forget: cherry::Ref, restore: Option<cherry::Ref>) {
+
+        // Forget the last tree
         self.cherry_mut(forget).pop_tree();
+
         if self.cherry(forget).num_occurrences() == 0 {
+            // Completely remove the cherry if it no longer occurs in any tree
             self.remove_cherry(forget);
         } else if let Some(cherry::Ref::NonTrivial(index)) = restore {
-                let cherry = self.remove_cherry(forget);
-                self.restore_non_trivial_cherry(index, cherry);
+            // If the cherry was moved from the list of non-trivial cherries to the list of trivial
+            // cherries when recording it, it needs to be moved back now.
+            let cherry = self.remove_cherry(forget);
+            self.restore_non_trivial_cherry(index, cherry);
         }
     }
 
@@ -195,7 +210,7 @@ impl<T: Clone> State<T> {
         cherry_ref
     }
 
-    /// Push a cherry to then end of the list of non-trivial cherries
+    /// Push a cherry to the end of the list of non-trivial cherries
     pub fn push_non_trivial_cherry(&mut self, mut cherry: cherry::Cherry) -> cherry::Ref {
         let cherry_ref = cherry::Ref::NonTrivial(self.non_trivial_cherries.len());
         let (u, v)     = cherry.leaves();
@@ -208,7 +223,7 @@ impl<T: Clone> State<T> {
         cherry_ref
     }
 
-    /// Pop a trivial cherry
+    /// Pop a trivial cherry from the end of the list of non-trivial cherries
     pub fn pop_trivial_cherry(&mut self) -> Option<cherry::Cherry> {
         self.trivial_cherries.pop().map(|cherry| {
             let (u, v)     = cherry.leaves();
@@ -219,7 +234,7 @@ impl<T: Clone> State<T> {
         })
     }
 
-    /// Remove a cherry
+    /// Remove a cherry from the middle of the list of trivial or non-trivial cherries
     pub fn remove_cherry(&mut self, cherry_ref: cherry::Ref) -> cherry::Cherry {
 
         // First remove the cherry from the list of cherries
@@ -267,7 +282,7 @@ impl<T: Clone> State<T> {
         cherry
     }
 
-    /// Restore a trivial cherry
+    /// Restore a cherry to its original position in the list of trivial cherries
     pub fn restore_trivial_cherry(&mut self, index: usize, mut cherry: cherry::Cherry) {
 
         // Restore references to the cherry to be restored
@@ -289,7 +304,7 @@ impl<T: Clone> State<T> {
         self.trivial_cherries.push(cherry);
     }
 
-    /// Restore a non-trivial cherry
+    /// Restore a cherry to its original position in the list of non-trivial cherries
     pub fn restore_non_trivial_cherry(&mut self, index: usize, mut cherry: cherry::Cherry) {
 
         // Restore references to the cherry to be restored
@@ -311,7 +326,7 @@ impl<T: Clone> State<T> {
         self.non_trivial_cherries.push(cherry);
     }
 
-    /// Remove the given cherry ref
+    /// Remove the `index`th cherry reference associated with `leaf`
     fn remove_cherry_ref(&mut self, leaf: Leaf, index: usize) {
         self.leaf_mut(leaf).remove_cherry(index);
         if index < self.leaf(leaf).num_cherries() {
@@ -320,7 +335,7 @@ impl<T: Clone> State<T> {
         }
     }
 
-    /// Restore a cherry ref
+    /// Restore the `index`th cherry reference associated with `leaf`
     fn restore_cherry_ref(&mut self, leaf: Leaf, index: usize, mut cherry_ref: cherry::Ref) {
         let num_cherries = self.leaf(leaf).num_cherries();
         if index < num_cherries {
@@ -544,16 +559,22 @@ pub mod tests {
         }
 
         // Check the list of references to cherries stored for each leaf
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
 
         // Check the list of trivial cherries
         assert_eq!(state.trivial_cherries.len(), 1);
@@ -630,16 +651,20 @@ pub mod tests {
         let (rec2, mov2) = state.record_cherry(Leaf::new(3), Leaf::new(7), 2);
 
         // Check that references to them occur in the cherry lists of the affected leaves
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(4)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::NonTrivial(4)]);
 
@@ -668,16 +693,20 @@ pub mod tests {
         // Recording cherry (1, 2) once more should make it trivial now because it occurs in all
         // trees
         let (rec3, mov3) = state.record_cherry(Leaf::new(1), Leaf::new(2), 2);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.trivial_cherries.len(), 2);
@@ -702,16 +731,20 @@ pub mod tests {
 
         // Forgetting cherry (1, 2) should get us back to the previous state
         state.forget_cherry(rec3, mov3);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(4)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::NonTrivial(4)]);
         assert_eq!(state.trivial_cherries.len(), 1);
@@ -737,16 +770,22 @@ pub mod tests {
 
         // Forget (3, 7)
         state.forget_cherry(rec2, mov2);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![ &cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -767,16 +806,22 @@ pub mod tests {
 
         // Forget (1, 2); we should be back to the original state now
         state.forget_cherry(rec1, mov1);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -873,20 +918,25 @@ pub mod tests {
         let mut state = State::new(trees);
 
         // Push a trivial cherry (3, 5)
-        let cherry_ref = state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
+        let cherry_ref =
+            state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
         assert_eq!(cherry_ref, cherry::Ref::Trivial(1));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 2);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -896,9 +946,11 @@ pub mod tests {
         assert_eq!(state.trivial_cherries[1].trees().collect::<Vec<&usize>>(), vec![&3]);
 
         // Push a trivial cherry (2, 7)
-        let cherry_ref = state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+        let cherry_ref =
+            state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
         assert_eq!(cherry_ref, cherry::Ref::Trivial(2));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -909,7 +961,8 @@ pub mod tests {
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::Trivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 3);
@@ -927,18 +980,22 @@ pub mod tests {
         let cherry = &state.pop_trivial_cherry();
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(2), Leaf::new(7)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 2);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -948,20 +1005,27 @@ pub mod tests {
         assert_eq!(state.trivial_cherries[1].trees().collect::<Vec<&usize>>(), vec![&3]);
 
         // Push (1, 4)
-        let cherry_ref = state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(1), Leaf::new(4), 3));
+        let cherry_ref =
+            state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(1), Leaf::new(4), 3));
         assert_eq!(cherry_ref, cherry::Ref::Trivial(2));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(2)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3),
+                   &cherry::Ref::Trivial(2)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2), &cherry::Ref::Trivial(2)]);
+                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2),
+                   &cherry::Ref::Trivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 3);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -974,20 +1038,25 @@ pub mod tests {
         assert_eq!(state.trivial_cherries[2].trees().collect::<Vec<&usize>>(), vec![&3]);
 
         // Push (2, 7)
-        let cherry_ref = state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+        let cherry_ref =
+            state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
         assert_eq!(cherry_ref, cherry::Ref::Trivial(3));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(2)]);
+                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3),
+                   &cherry::Ref::Trivial(2)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2), &cherry::Ref::Trivial(2)]);
+                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2),
+                   &cherry::Ref::Trivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::Trivial(3)]);
         assert_eq!(state.trivial_cherries.len(), 4);
@@ -1008,18 +1077,24 @@ pub mod tests {
         let cherry = &state.pop_trivial_cherry();
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(2), Leaf::new(7)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(2)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3),
+                   &cherry::Ref::Trivial(2)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2), &cherry::Ref::Trivial(2)]);
+                   &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2),
+                   &cherry::Ref::Trivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 3);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1035,18 +1110,22 @@ pub mod tests {
         let cherry = &state.pop_trivial_cherry();
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(1), Leaf::new(4)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 2);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1059,16 +1138,22 @@ pub mod tests {
         let cherry = &state.pop_trivial_cherry();
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(3), Leaf::new(5)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1084,20 +1169,25 @@ pub mod tests {
         let mut state = State::new(trees);
 
         // Push (3, 5)
-        let cherry_ref = state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
+        let cherry_ref =
+            state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
         assert_eq!(cherry_ref, cherry::Ref::NonTrivial(4));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(4)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::NonTrivial(4)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.non_trivial_cherries.len(), 5);
         assert_eq!(state.non_trivial_cherries[0].leaves(), (Leaf::new(0), Leaf::new(1)));
         assert_eq!(state.non_trivial_cherries[0].indices(), (0, 0));
@@ -1116,9 +1206,11 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[4].trees().collect::<Vec<&usize>>(), vec![&3]);
 
         // Push (2, 7)
-        let cherry_ref = state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+        let cherry_ref =
+            state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
         assert_eq!(cherry_ref, cherry::Ref::NonTrivial(5));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1129,7 +1221,8 @@ pub mod tests {
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0), &cherry::Ref::NonTrivial(4)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(2), &cherry::Ref::NonTrivial(5)]);
         assert_eq!(state.non_trivial_cherries.len(), 6);
@@ -1165,15 +1258,21 @@ pub mod tests {
         // Remove the last non-trivial cherry
         let cherry = state.remove_cherry(cherry::Ref::NonTrivial(3));
         let empty_vec: Vec<&cherry::Ref> = vec![];
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
-        assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1191,16 +1290,22 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_non_trivial_cherry(3, cherry);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1221,15 +1326,21 @@ pub mod tests {
 
         // Remove a non-trivial cherry from the middle
         let cherry = state.remove_cherry(cherry::Ref::NonTrivial(1));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(1)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
-        assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1247,16 +1358,22 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_non_trivial_cherry(1, cherry);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1277,16 +1394,20 @@ pub mod tests {
 
         // Remove the last trivial cherry
         let cherry = state.remove_cherry(cherry::Ref::Trivial(0));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
         assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 0);
         assert_eq!(state.num_non_trivial_cherries(), 4);
         assert_eq!(state.non_trivial_cherries[0].leaves(), (Leaf::new(0), Leaf::new(1)));
@@ -1304,16 +1425,22 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_trivial_cherry(0, cherry);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1335,17 +1462,21 @@ pub mod tests {
         // Remove a trivial cherry from the middle
         state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(1), Leaf::new(2), 0));
         let cherry = state.remove_cherry(cherry::Ref::Trivial(0));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(0)]);
+                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3),
+                   &cherry::Ref::Trivial(0)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
         assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(1), Leaf::new(2)));
         assert_eq!(state.trivial_cherries[0].indices(), (2, 1));
@@ -1366,17 +1497,23 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_trivial_cherry(0, cherry);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
-                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(1)]);
+                   &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3),
+                   &cherry::Ref::Trivial(1)]);
         assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(3), &cherry::Ref::Trivial(1)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 2);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1409,15 +1546,22 @@ pub mod tests {
         // Get rid of leaf 1's 0th cherry (not the last cherry in the list, so the old last
         // cherry's cross pointers must be updated).
         state.remove_cherry_ref(Leaf::new(1), 0);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
-        assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1439,16 +1583,22 @@ pub mod tests {
         // ... and bring it back (the old last cherry is back in the last place and again has the
         // correct cross pointers).
         state.restore_cherry_ref(Leaf::new(1), 0, cherry::Ref::NonTrivial(0));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1469,15 +1619,22 @@ pub mod tests {
 
         // Remove the last cherry of leaf 4.
         state.remove_cherry_ref(Leaf::new(4), 1);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
-        assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1498,16 +1655,22 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_cherry_ref(Leaf::new(4), 1, cherry::Ref::NonTrivial(2));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1528,17 +1691,22 @@ pub mod tests {
 
         // Remove the only cherry of leaf 5.
         state.remove_cherry_ref(Leaf::new(5), 0);
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
         let empty_vec: Vec<&cherry::Ref> = vec![];
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));
@@ -1559,16 +1727,22 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_cherry_ref(Leaf::new(5), 0, cherry::Ref::Trivial(0));
-        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(0)]);
+        assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0), &cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(3)]);
-        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(1)]);
+        assert_eq!(state.leaves[2].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(3)]);
+        assert_eq!(state.leaves[3].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::Trivial(0)]);
-        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![&cherry::Ref::NonTrivial(2)]);
+        assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::Trivial(0)]);
+        assert_eq!(state.leaves[7].cherries().collect::<Vec<&cherry::Ref>>(), vec![
+                   &cherry::Ref::NonTrivial(2)]);
         assert_eq!(state.trivial_cherries.len(), 1);
         assert_eq!(state.trivial_cherries[0].leaves(), (Leaf::new(5), Leaf::new(6)));
         assert_eq!(state.trivial_cherries[0].indices(), (0, 0));

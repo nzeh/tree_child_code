@@ -1,3 +1,5 @@
+//! This module implements basic operations on leaves during the search.
+
 use std::slice;
 use super::cherry;
 
@@ -9,13 +11,13 @@ pub struct Leaf {
     /// The number of trees this leaf still occurs in
     num_occurrences: usize,
 
-    /// The cherry this leaf is part of
+    /// The cherries this leaf is part of
     cherries: Vec<cherry::Ref>,
 }
 
 impl Leaf {
 
-    /// Create a new leaf
+    /// Create a new leaf occurring in the given number of trees
     pub fn new(num_occurrences: usize) -> Leaf {
         Leaf { num_occurrences, cherries: vec![] }
     }
@@ -40,12 +42,12 @@ impl Leaf {
         self.cherries.len()
     }
 
-    /// Access the ixth cherry ref in this leaf's cherry list
+    /// Access the `ix`th cherry ref in this leaf's cherry list
     pub fn cherry(&self, ix: usize) -> cherry::Ref {
         self.cherries[ix]
     }
 
-    /// Provide a mutable reference to the ixt cherry in this leaf's cherry list
+    /// Provide a mutable reference to the `ix`th cherry in this leaf's cherry list
     pub fn cherry_mut(&mut self, ix: usize) -> &mut cherry::Ref {
         &mut self.cherries[ix]
     }
@@ -60,7 +62,7 @@ impl Leaf {
         self.cherries.swap_remove(ix);
     }
 
-    /// Update the reference when a cherry was moved
+    /// Update the `ix`th cherry ref with a new reference (to reflect that this cherry was moved)
     pub fn replace_cherry(&mut self, ix: usize, cherry_ref: cherry::Ref) {
         self.cherries[ix] = cherry_ref;
     }

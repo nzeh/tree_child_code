@@ -31,7 +31,8 @@ pub fn tree_child_sequence<T: Clone + Send + 'static>(
     poll_delay:               Option<usize>,
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
-    master::Master::new(trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt).run()
+    master::Master::new(
+        trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt).run()
 }
 
 /// Let's make pairs printable
@@ -57,7 +58,8 @@ mod tests {
     fn tree_child_sequence() {
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
-            let newick = "(a,((b,(c,d)),e));\n((a,b),((c,d),e));\n((a,b),(c,(d,e)));\n(a,((b,c),(d,e)));\n";
+            let newick =
+                "(a,((b,(c,d)),e));\n((a,b),((c,d),e));\n((a,b),(c,(d,e)));\n(a,((b,c),(d,e)));\n";
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };

@@ -702,9 +702,11 @@ mod tests {
     fn build_tree_is_leaf() {
         let trees        = build_tree();
         let mut nodes0   = trees[0].nodes();
-        let mut answers0 = vec![true, true, true, true, false, true, false, true, false].into_iter();
+        let mut answers0 = vec![true, true, true, true, false, true, false, true, false]
+            .into_iter();
         let mut nodes1   = trees[1].nodes();
-        let mut answers1 = vec![true, true, true, true, true, false, false, false].into_iter();
+        let mut answers1 = vec![true, true, true, true, true, false, false, false]
+            .into_iter();
         for _ in 0..9 {
             assert_eq!(trees[0].is_leaf(nodes0.next().unwrap()), answers0.next().unwrap());
         }
@@ -765,7 +767,8 @@ mod tests {
         trees[0].prune_leaf(leaf1);
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
                    Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
@@ -773,7 +776,8 @@ mod tests {
         trees[0].prune_leaf(leaf2);
         assert_eq!(trees[0].leaf_count(), 4);
         assert_eq!(trees[0].node_count(), 7);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(2), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
                    Node(0), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
@@ -782,7 +786,8 @@ mod tests {
         trees[0].restore_leaf(leaf2);
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
                    Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
@@ -791,16 +796,20 @@ mod tests {
         trees[0].restore_leaf(leaf1);
         assert_eq!(trees[0].leaf_count(), 6);
         assert_eq!(trees[0].node_count(), 9);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(3), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(3), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
-                   Node(0), Node(1), Node(2), Node(3), Node(4), Node(5), Node(6), Node(7), Node(8)]);
-        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(3)]);
+                   Node(0), Node(1), Node(2), Node(3), Node(4),
+                   Node(5), Node(6), Node(7), Node(8)]);
+        assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![
+                   Node(0), Node(2), Node(3)]);
         assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5), Node(1)]);
 
         trees[0].prune_leaf(leaf1);
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(1), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(1), Node(2), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
                    Node(0), Node(1), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
@@ -808,7 +817,8 @@ mod tests {
         trees[0].prune_leaf(leaf2);
         assert_eq!(trees[0].leaf_count(), 4);
         assert_eq!(trees[0].node_count(), 7);
-        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![Node(0), Node(2), Node(5), Node(7)]);
+        assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
+                   Node(0), Node(2), Node(5), Node(7)]);
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(), vec![
                    Node(0), Node(2), Node(4), Node(5), Node(6), Node(7), Node(8)]);
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
