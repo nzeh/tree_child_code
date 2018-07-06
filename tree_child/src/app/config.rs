@@ -30,6 +30,8 @@ pub struct Config {
 }
 
 impl Config {
+
+    /// Create a new config object from the command line arguments
     pub fn new() -> Self {
         // Define the acceptable arguments
         let args = [

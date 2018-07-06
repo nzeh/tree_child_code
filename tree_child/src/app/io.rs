@@ -12,9 +12,9 @@ use tree_child_sequence::{Pair, TcSeq};
 
 /// Read the input from a file
 pub fn read_input(file_name: &str) -> app::Result<Vec<Tree<String>>> {
-    let mut newick = String::from("");
+    let mut newick  = String::from("");
+    let mut builder = TreeBuilder::new();
     fs::File::open(file_name)?.read_to_string(&mut newick)?;
-    let mut builder: TreeBuilder<String> = TreeBuilder::new();
     newick::parse_forest(&mut builder, &newick)?;
     Ok(builder.trees())
 }

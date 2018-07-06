@@ -478,6 +478,7 @@ impl<'a> Iterator for ChildIter<'a> {
 /// built trees.  We're now back to not having a current tree.
 ///
 /// The set of constructed trees is retrieved using `TreeBuilder::trees()`.
+#[derive(Clone)]
 pub struct TreeBuilder<T> {
 
     /// The current tree under construction
