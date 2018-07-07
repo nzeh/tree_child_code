@@ -37,7 +37,6 @@
 //! or forest.  In the case of `format_forest()`, each tree is placed on its own line in the output
 //! string.
 
-
 use tree::{Node, Tree, TreeBuilder};
 use std::error;
 use std::fmt;
@@ -46,23 +45,23 @@ use std::iter;
 use std::result;
 use std::str;
 
-
 /// The parser's result type
 type Result<T> = result::Result<T, Error>;
-
 
 /// The error raised when a parse error is encountered
 #[derive(Debug)]
 pub struct Error {
-    message: String,
-    pos:     Pos,
-}
 
+    /// The error message
+    message: String,
+
+    /// The position in the input text where the error occurred
+    pos: Pos,
+}
 
 /// Representation of an input position
 #[derive(Clone, Copy, Debug)]
 struct Pos(usize, usize);
-
 
 /// Parse a given one-line Newick string using the given tree builder
 ///
@@ -81,7 +80,6 @@ pub fn parse_tree(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()>
     Parser::new(builder, newick).parse_tree()
 }
 
-
 /// Parse a given multi-line Newick string using the given tree builder
 ///
 /// # Example
@@ -98,7 +96,6 @@ pub fn parse_tree(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()>
 pub fn parse_forest(builder: &mut TreeBuilder<String>, newick: &str) -> Result<()> {
     Parser::new(builder, newick).parse_forest()
 }
-
 
 /// Struct representing the state of the Newick parser
 struct Parser<'b, 'i> {
@@ -130,7 +127,7 @@ impl<'b, 'i> Parser<'b, 'i> {
         self.parse_one_tree()?;
         match self.chars.next() {
             None => Ok(()),
-            _    => self.error("expected a one-line input"),
+            _    => Self::error("expected a one-line input", self.pos),
         }
     }
 
@@ -162,10 +159,7 @@ impl<'b, 'i> Parser<'b, 'i> {
         match self.chars.next() {
             None       => Ok(()),
             Some('\n') => Ok(()),
-            _          => {
-                self.pos = pos;
-                self.error("expected end of line")
-            },
+            _          => Self::error("expected end of line", pos),
         }
     }
 
@@ -174,10 +168,7 @@ impl<'b, 'i> Parser<'b, 'i> {
         let pos = self.pos;
         match self.chars.next() {
             Some(c) if c == sym => Ok(()),
-            _ => {
-                self.pos = pos;
-                self.error(&format!("expected `{}'", sym))
-            },
+            _                   => Self::error(&format!("expected `{}'", sym), pos),
         }
     }
 
@@ -196,6 +187,7 @@ impl<'b, 'i> Parser<'b, 'i> {
     fn parse_subtree(&mut self) -> Result<Node> {
         self.skip_spaces();
         match self.chars.peek() {
+
             Some('(') => {
                 self.chars.next();
                 let children = self.parse_subtrees()?;
@@ -204,6 +196,7 @@ impl<'b, 'i> Parser<'b, 'i> {
                 self.skip_edge_length()?;
                 Ok(self.builder.new_node(children))
             },
+
             _ => {
                 let label = self.parse_label()?;
                 self.skip_edge_length()?;
@@ -214,31 +207,41 @@ impl<'b, 'i> Parser<'b, 'i> {
 
     /// Parse a list of subtrees
     fn parse_subtrees(&mut self) -> Result<Vec<Node>> {
+
         let mut nodes = vec![];
         let node = self.parse_subtree()?;
         nodes.push(node);
+
         loop {
+
             self.skip_spaces();
             match self.chars.peek() {
+
                 Some(',') => {
                     self.chars.next();
                     let node = self.parse_subtree()?;
                     nodes.push(node);
                 },
+
                 _ => break,
             };
         }
+
         Ok(nodes)
     }
 
     /// Skip edge lengths
     fn skip_edge_length(&mut self) -> Result<()> {
+
         self.skip_spaces();
+
         match self.chars.peek() {
             Some(&c) if c == ':' => (),
             _                    => return Ok(()),
         }
+
         self.chars.next();
+
         loop {
             match self.chars.peek() {
                 None                            => break,
@@ -248,12 +251,15 @@ impl<'b, 'i> Parser<'b, 'i> {
                 },
             };
         }
+
         Ok(())
     }
 
     /// Parse a node label
     fn parse_label(&mut self) -> Result<String> {
+
         let mut label = "".to_string();
+
         loop {
             match self.chars.peek() {
                 None                            => break,
@@ -266,18 +272,18 @@ impl<'b, 'i> Parser<'b, 'i> {
                 },
             }
         }
+
         Ok(label.trim().to_string())
     }
 
     /// Report an error at the current position
-    fn error<T>(&self, message: &str) -> Result<T> {
+    fn error<T>(message: &str, pos: Pos) -> Result<T> {
         Err(Error {
             message: message.to_string(),
-            pos:     self.pos,
+            pos,
         })
     }
 }
-
 
 /// Format a tree into a Newick string
 ///
@@ -297,7 +303,6 @@ pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
     format_one_tree(tree, &mut newick)?;
     Some(newick)
 }
-
 
 /// Format a forest into a Newick string, one line per tree.
 ///
@@ -320,7 +325,6 @@ pub fn format_forest<T: Clone + Display>(forest: &[Tree<T>]) -> Option<String> {
     }
     Some(newick)
 }
-
 
 /// Format a tree into a Newick string, held in a given string buffer
 fn format_one_tree<T: Clone + Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
@@ -351,7 +355,6 @@ fn format_one_tree<T: Clone + Display>(tree: &Tree<T>, newick: &mut String) -> O
         None
     }
 }
-
 
 #[cfg(test)]
 mod tests {
