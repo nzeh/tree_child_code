@@ -47,8 +47,8 @@ pub enum Ref {
 impl Cherry {
 
     /// Create a new cherry first found in `tree`
-    pub fn new(u: Leaf, v: Leaf, tree: usize) -> Cherry {
-        Cherry {
+    pub fn new(u: Leaf, v: Leaf, tree: usize) -> Self {
+        Self {
             u, v,
             uix:         0,
             vix:         0,

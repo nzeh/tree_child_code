@@ -18,8 +18,8 @@ pub struct Leaf {
 impl Leaf {
 
     /// Create a new leaf occurring in the given number of trees
-    pub fn new(num_occurrences: usize) -> Leaf {
-        Leaf { num_occurrences, cherries: vec![] }
+    pub fn new(num_occurrences: usize) -> Self {
+        Self { num_occurrences, cherries: vec![] }
     }
 
     /// Increase the number of occurrences of this leaf
