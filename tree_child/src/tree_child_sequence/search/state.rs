@@ -49,7 +49,7 @@ impl<T: Clone> State<T> {
         let num_leaves = trees[0].leaf_count();
         let leaves     = vec![leaf::Leaf::new(trees.len()); num_leaves];
 
-        let mut state = State {
+        let mut state = Self {
             trees,
             num_leaves,
             leaves,
@@ -71,11 +71,11 @@ impl<T: Clone> State<T> {
 
         for (i, tree) in self.trees.iter().enumerate() {
             for u in tree.leaves() {
-                if let Some(p) = tree.parent(u) {
+                if let (Some(u), Some(p)) = (tree.leaf_id(u), tree.parent(u)) {
                     for v in tree.children(p) {
-                        if let (Some(u_), Some(v_)) = (tree.leaf_id(u), tree.leaf_id(v)) {
-                            if u_ < v_ {
-                                cherries.push((u_, v_, i));
+                        if let Some(v) = tree.leaf_id(v) {
+                            if u < v {
+                                cherries.push((u, v, i));
                             }
                         }
                     }
@@ -114,10 +114,14 @@ impl<T: Clone> State<T> {
         tree: usize) -> (cherry::Ref, Option<cherry::Ref>) {
 
         // See whether we already have a cherry (u, v) on record
-        let cherry_ref = self.leaf(u).cherries().find(|cherry_ref| {
-            let (x, y) = self.cherry(**cherry_ref).leaves();
-            x == v || y == v
-        }).map(|cherry_ref| *cherry_ref);
+        let cherry_ref = self.leaf(u).cherries()
+
+            .find(|&&cherry_ref| {
+                let (x, y) = self.cherry(cherry_ref).leaves();
+                x == v || y == v
+            })
+
+            .map(|&cherry_ref| cherry_ref);
 
         // Add the current tree to the list of trees for this cherry or create a new cherry
         let cherry_ref = if let Some(cherry_ref) = cherry_ref {
@@ -127,13 +131,13 @@ impl<T: Clone> State<T> {
             self.push_non_trivial_cherry(cherry::Cherry::new(u, v, tree))
         };
 
-        // Mark the cherry as trivial if adding the new occurrence made it trivial
-        let cherry_occurrences = self.cherry(cherry_ref).num_occurrences();
-        let leaf_occurrences = min(
+        let num_cherry_occurrences = self.cherry(cherry_ref).num_occurrences();
+        let num_leaf_occurrences = min(
             self.leaf(u).num_occurrences(),
             self.leaf(v).num_occurrences());
 
-        if leaf_occurrences == cherry_occurrences {
+        // Mark the cherry as trivial if adding the new occurrence made it trivial
+        if num_leaf_occurrences == num_cherry_occurrences {
             let cherry = self.remove_cherry(cherry_ref);
             (self.push_trivial_cherry(cherry), Some(cherry_ref))
         } else {
@@ -148,88 +152,111 @@ impl<T: Clone> State<T> {
         self.cherry_mut(forget).pop_tree();
 
         if self.cherry(forget).num_occurrences() == 0 {
+
             // Completely remove the cherry if it no longer occurs in any tree
             self.remove_cherry(forget);
-        } else if let Some(cherry::Ref::NonTrivial(index)) = restore {
+
+        } else if let Some(cherry::Ref::NonTrivial(restore)) = restore {
+
             // If the cherry was moved from the list of non-trivial cherries to the list of trivial
             // cherries when recording it, it needs to be moved back now.
             let cherry = self.remove_cherry(forget);
-            self.restore_non_trivial_cherry(index, cherry);
+            self.restore_non_trivial_cherry(restore, cherry);
         }
     }
 
     /// Check whether the given leaf is part of a trivial cherry
     pub fn check_for_trivial_cherry(&self, leaf: Leaf) -> Option<cherry::Ref> {
 
+        let leaf = self.leaf(leaf);
+
         // The leaf can be part of a trivial cherry only if there is exactly one cherry involving
         // this leaf.
-        let leaf = self.leaf(leaf);
         if leaf.num_cherries() == 1 {
+
             let cherry_ref = leaf.cherry(0);
+
+            // It *is* part of a trivial cherry if the leaf occurs exactly as often as the cherry
+            // it is part of.
             if leaf.num_occurrences() == self.cherry(cherry_ref).num_occurrences() {
-                Some(cherry_ref)
-            } else {
-                None
+                return Some(cherry_ref);
             }
-        } else {
-            None
         }
+
+        None
     }
 
     /// Check whether the given node forms a cherry in the given tree
     pub fn check_for_cherry(&self, node: Node, tree: usize) -> Option<(Leaf, Leaf)> {
+
         let tree = self.tree(tree);
-        if let Some(leaf) = tree.leaf_id(node) {
-            if let Some(parent) = tree.parent(node) {
-                for sib in tree.children(parent) {
-                    if sib != node {
-                        if let Some(sib) = tree.leaf_id(sib) {
-                            return Some(if leaf < sib {
-                                (leaf, sib)
-                            } else  {
-                                (sib, leaf)
-                            })
-                        }
+
+        // To be part of a cherry, the node must be a leaf and have a parent
+        if let (Some(leaf), Some(parent)) = (tree.leaf_id(node), tree.parent(node)) {
+
+            for sib in tree.children(parent) {
+                if sib != node {
+
+                    // If the sibling is a leaf, we have a cherry
+                    if let Some(sib) = tree.leaf_id(sib) {
+
+                        // Order it smallest leaf first
+                        return Some(if leaf < sib {
+                            (leaf, sib)
+                        } else  {
+                            (sib, leaf)
+                        })
                     }
                 }
             }
         }
+
         None
     }
 
     /// Push a cherry to the end of the list of trivial cherries
     pub fn push_trivial_cherry(&mut self, mut cherry: cherry::Cherry) -> cherry::Ref {
+
         let cherry_ref = cherry::Ref::Trivial(self.trivial_cherries.len());
         let (u, v)     = cherry.leaves();
         let uix        = self.leaf(u).num_cherries();
         let vix        = self.leaf(v).num_cherries();
+
         cherry.set_indices(uix, vix);
         self.leaf_mut(u).add_cherry(cherry_ref);
         self.leaf_mut(v).add_cherry(cherry_ref);
         self.trivial_cherries.push(cherry);
+
         cherry_ref
     }
 
     /// Push a cherry to the end of the list of non-trivial cherries
     pub fn push_non_trivial_cherry(&mut self, mut cherry: cherry::Cherry) -> cherry::Ref {
+
         let cherry_ref = cherry::Ref::NonTrivial(self.non_trivial_cherries.len());
         let (u, v)     = cherry.leaves();
         let uix        = self.leaf(u).num_cherries();
         let vix        = self.leaf(v).num_cherries();
+
         cherry.set_indices(uix, vix);
         self.leaf_mut(u).add_cherry(cherry_ref);
         self.leaf_mut(v).add_cherry(cherry_ref);
         self.non_trivial_cherries.push(cherry);
+
         cherry_ref
     }
 
     /// Pop a trivial cherry from the end of the list of non-trivial cherries
     pub fn pop_trivial_cherry(&mut self) -> Option<cherry::Cherry> {
+
         self.trivial_cherries.pop().map(|cherry| {
+
             let (u, v)     = cherry.leaves();
             let (uix, vix) = cherry.indices();
+
             self.remove_cherry_ref(u, uix);
             self.remove_cherry_ref(v, vix);
+
             cherry
         })
     }
@@ -237,33 +264,32 @@ impl<T: Clone> State<T> {
     /// Remove a cherry from the middle of the list of trivial or non-trivial cherries
     pub fn remove_cherry(&mut self, cherry_ref: cherry::Ref) -> cherry::Cherry {
 
+        // Helper to remove a cherry from a given cherry list
+        fn remove_from_cherry_list(cherries: &mut Vec<cherry::Cherry>, ix: usize)
+            -> (cherry::Cherry, Option<&cherry::Cherry>) {
+
+            let cherry      = cherries.swap_remove(ix);
+            let replacement = if ix < cherries.len() {
+                Some(&cherries[ix])
+            } else {
+                None
+            };
+            (cherry, replacement)
+        }
+
         // First remove the cherry from the list of cherries
         let (cherry, updates) = {
-
+            
             let (cherry, replacement) = match cherry_ref {
 
-                cherry::Ref::Trivial(ix) => {
-                    let cherry = self.trivial_cherries.swap_remove(ix);
-                    let replacement = if ix < self.trivial_cherries.len() {
-                        Some(&self.trivial_cherries[ix])
-                    } else {
-                        None
-                    };
-                    (cherry, replacement)
-                },
+                cherry::Ref::Trivial(ix) =>
+                    remove_from_cherry_list(&mut self.trivial_cherries, ix),
 
-                cherry::Ref::NonTrivial(ix) => {
-                    let cherry = self.non_trivial_cherries.swap_remove(ix);
-                    let replacement = if ix < self.non_trivial_cherries.len() {
-                        Some(&self.non_trivial_cherries[ix])
-                    } else {
-                        None
-                    };
-                    (cherry, replacement)
-                },
+                cherry::Ref::NonTrivial(ix) =>
+                    remove_from_cherry_list(&mut self.non_trivial_cherries, ix),
             };
 
-            (cherry, replacement.map(|rep| (rep.leaves(), rep.indices())))
+            (cherry, replacement.map(|replacement| (replacement.leaves(), replacement.indices())))
         };
 
         // Since we do this by moving a different cherry in its place, we need to update the
