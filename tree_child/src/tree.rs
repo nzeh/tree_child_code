@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::slice;
 
-
 /// A phylogenetic tree whose leaves have labels of some type `T`
 #[derive(Clone)]
 pub struct Tree<T> {
@@ -33,151 +32,11 @@ pub struct Tree<T> {
     leaf_count: usize,
 }
 
-
-/// A marker type that holds on to an element and marks it as alive or dead
-#[derive(Clone)]
-struct Removable<T> {
-    
-    /// The stored item
-    item: T,
-
-    /// Is the item currently present?
-    is_present: bool,
-}
-
-
-/// The data associated with a node
-#[derive(Clone)]
-struct NodeData<T> {
-
-    /// Parent
-    parent: Option<Node>,
-
-    /// The leaf- or internal-node-specific data
-    data: TypedNodeData<T>,
-}
-
-
-/// The part of the node data that's specific to leaves or internal nodes.
-#[derive(Clone)]
-enum TypedNodeData<T> {
-
-    /// An leaf has an ID of type `Leaf` and a label of type `T`.
-    Leaf(Leaf, T),
-
-    /// An internal node has a list of children.
-    Internal(Vec<Node>),
-}
-
-
-/// The type used to represent tree nodes
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Node(usize);
-
-
-/// The type used to refer to leaves
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Leaf(usize);
-
-
-/// An iterator over the nodes of a tree (see `Tree::nodes()`).
-pub struct NodeIter<'a, T: 'a> {
-    tree: &'a Tree<T>,
-    node: usize,
-    end:  usize,
-}
-
-/// An iterator over the leaves of a tree (see `Tree::leaves()`).
-pub struct LeafIter<'a> {
-    iter: slice::Iter<'a, Option<Removable<Node>>>,
-}
-
-
-/// An iterator over the children of a node (see `Tree::children()`).
-pub struct ChildIter<'a> {
-    iter: slice::Iter<'a, Node>,
-}
-
-
-impl<T> Removable<T> {
-
-    /// Create a new removable item
-    fn new(item: T) -> Removable<T> {
-        Removable {
-            item,
-            is_present: true,
-        }
-    }
-
-    /// Mark the item as removed
-    fn remove(&mut self) {
-        assert!(self.is_present, "double-removal of Removable");
-        self.is_present = false;
-    }
-
-    /// Mark the item as present
-    fn restore(&mut self) {
-        assert!(!self.is_present, "double-restoration of Removable");
-        self.is_present = true;
-    }
-
-    /// Provide a reference to the stored item
-    fn item(&self) -> &T {
-        assert!(self.is_present, "access to removed Removable");
-        &self.item
-    }
-
-    /// Provide a reference to the stored item, without checking that the item is currently present
-    fn item_unchecked(&self) -> &T {
-        &self.item
-    }
-
-    /// Provide a mutable reference to a stored item
-    fn item_mut(&mut self) -> &mut T {
-        assert!(self.is_present, "access to removed Removable");
-        &mut self.item
-    }
-
-    /// Is this removable present?
-    fn is_present(&self) -> bool {
-        self.is_present
-    }
-}
-
-
-impl Node {
-
-    /// Create a new node from an integer ID
-    pub fn new(id: usize) -> Self {
-        Node(id)
-    }
-
-    /// Extract the underlying integer ID
-    pub fn id(self) -> usize {
-        self.0
-    }
-}
-
-
-impl Leaf {
-
-    /// Create a new leaf from an integer ID
-    pub fn new(id: usize) -> Self {
-        Leaf(id)
-    }
-
-    /// Extract the underlying integer ID
-    pub fn id(self) -> usize {
-        self.0
-    }
-}
-
-
 impl<T: Clone> Tree<T> {
 
     /// Create a new empty tree
     pub fn new() -> Self {
-        Tree {
+        Self {
             nodes:      vec![],
             root:       None,
             leaves:     vec![],
@@ -288,13 +147,13 @@ impl<T: Clone> Tree<T> {
 
     /// Prune the given leaf from the tree and return the parent, `None` if this leaf was the root.
     pub fn prune_leaf(&mut self, leaf: Leaf) -> Option<Node> {
+
         let node   = self.leaf(leaf);
         let parent = self.parent(node);
 
-        if let Some(parent) = parent {
-            self.remove_child(parent, node);
-        } else {
-            self.root = None;
+        match parent {
+            Some(parent) => self.remove_child(parent, node),
+            _            => self.root = None,
         }
 
         self.leaves[leaf.id()].as_mut().unwrap().remove();
@@ -315,10 +174,9 @@ impl<T: Clone> Tree<T> {
         self.leaf_count += 1;
         self.node_count += 1;
 
-        if let Some(parent) = self.parent(node) {
-            self.add_child(parent, node);
-        } else {
-            self.root = Some(node);
+        match self.parent(node) {
+            Some(parent) => self.add_child(parent, node),
+            _            => self.root = Some(node),
         }
     }
 
@@ -326,13 +184,13 @@ impl<T: Clone> Tree<T> {
     pub fn suppress_node(&mut self, node: Node) -> Node {
 
         let child = self.internal_children(node)[0];
-
         let parent = self.parent(node);
+
         self.node_mut(child).parent = parent;
-        if let Some(parent) = parent {
-            self.replace_child(parent, node, child);
-        } else {
-            self.root = Some(child);
+
+        match parent {
+            Some(parent) => self.replace_child(parent, node, child),
+            _            => self.root = Some(child),
         }
 
         self.node_count -= 1;
@@ -350,37 +208,39 @@ impl<T: Clone> Tree<T> {
         let child = self.internal_children(node)[0];
 
         self.node_mut(child).parent = Some(node);
-        if let Some(parent) = self.parent(node) {
-            self.replace_child(parent, child, node);
-        } else {
-            self.root = Some(node);
+
+        match self.parent(node) {
+            Some(parent) => self.replace_child(parent, child, node),
+            _            => self.root = Some(node),
         }
     }
 
     /// Add a child to a given node
     fn add_child(&mut self, parent: Node, child: Node) {
-        let children = self.internal_children_mut(parent);
-        children.push(child);
+        self.internal_children_mut(parent).push(child);
     }
 
     /// Remove a child from a given node
     fn remove_child(&mut self, parent: Node, child: Node) {
+
         let children = self.internal_children_mut(parent);
+
         match children.iter().position(|&c| c == child) {
-            Some(pos) => { children.swap_remove(pos); },
-            None      => panic!("Cannot remove nonexistent child!"),
-        }
+            Some(pos) => children.swap_remove(pos),
+            _         => panic!("Cannot remove nonexistent child!"),
+        };
     }
 
     /// Rplace a child with a different child
     fn replace_child(&mut self, parent: Node, old_child: Node, new_child: Node) {
-        let children = self.internal_children_mut(parent);
-        for child in children.iter_mut() {
+
+        for child in self.internal_children_mut(parent).iter_mut() {
             if *child == old_child {
                 *child = new_child;
                 return;
             }
         }
+
         panic!("Cannot replace non-existent child!");
     }
 
@@ -411,6 +271,127 @@ impl<T: Clone> Tree<T> {
     }
 }
 
+/// A marker type that holds on to an element and marks it as alive or dead
+#[derive(Clone)]
+struct Removable<T> {
+    
+    /// The stored item
+    item: T,
+
+    /// Is the item currently present?
+    is_present: bool,
+}
+
+impl<T> Removable<T> {
+
+    /// Create a new removable item
+    fn new(item: T) -> Self {
+        Self { item, is_present: true }
+    }
+
+    /// Mark the item as removed
+    fn remove(&mut self) {
+        assert!(self.is_present, "double-removal of Removable");
+        self.is_present = false;
+    }
+
+    /// Mark the item as present
+    fn restore(&mut self) {
+        assert!(!self.is_present, "double-restoration of Removable");
+        self.is_present = true;
+    }
+
+    /// Provide a reference to the stored item
+    fn item(&self) -> &T {
+        assert!(self.is_present, "access to removed Removable");
+        &self.item
+    }
+
+    /// Provide a reference to the stored item, without checking that the item is currently present
+    fn item_unchecked(&self) -> &T {
+        &self.item
+    }
+
+    /// Provide a mutable reference to a stored item
+    fn item_mut(&mut self) -> &mut T {
+        assert!(self.is_present, "access to removed Removable");
+        &mut self.item
+    }
+
+    /// Is this removable present?
+    fn is_present(&self) -> bool {
+        self.is_present
+    }
+}
+
+/// The data associated with a node
+#[derive(Clone)]
+struct NodeData<T> {
+
+    /// Parent
+    parent: Option<Node>,
+
+    /// The leaf- or internal-node-specific data
+    data: TypedNodeData<T>,
+}
+
+/// The part of the node data that's specific to leaves or internal nodes.
+#[derive(Clone)]
+enum TypedNodeData<T> {
+
+    /// A leaf has an ID of type `Leaf` and a label of type `T`.
+    Leaf(Leaf, T),
+
+    /// An internal node has a list of children.
+    Internal(Vec<Node>),
+}
+
+/// The type used to represent tree nodes
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Node(usize);
+
+impl Node {
+
+    /// Create a new node from an integer ID
+    pub fn new(id: usize) -> Self {
+        Node(id)
+    }
+
+    /// Extract the underlying integer ID
+    pub fn id(self) -> usize {
+        self.0
+    }
+}
+
+/// The type used to refer to leaves
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Leaf(usize);
+
+impl Leaf {
+
+    /// Create a new leaf from an integer ID
+    pub fn new(id: usize) -> Self {
+        Leaf(id)
+    }
+
+    /// Extract the underlying integer ID
+    pub fn id(self) -> usize {
+        self.0
+    }
+}
+
+/// An iterator over the nodes of a tree (see `Tree::nodes()`).
+pub struct NodeIter<'a, T: 'a> {
+
+    /// The tree over whose nodes we're iterating
+    tree: &'a Tree<T>,
+
+    /// The index of the current node to be reported
+    node: usize,
+
+    /// The number of nodes to be iterated over
+    end:  usize,
+}
 
 impl<'a, T> Iterator for NodeIter<'a, T> {
 
@@ -428,6 +409,12 @@ impl<'a, T> Iterator for NodeIter<'a, T> {
     }
 }
 
+/// An iterator over the leaves of a tree (see `Tree::leaves()`).
+pub struct LeafIter<'a> {
+
+    /// The inner iterator over the vector of leaves
+    iter: slice::Iter<'a, Option<Removable<Node>>>,
+}
 
 impl<'a> Iterator for LeafIter<'a> {
 
@@ -445,6 +432,12 @@ impl<'a> Iterator for LeafIter<'a> {
     }
 }
 
+/// An iterator over the children of a node (see `Tree::children()`).
+pub struct ChildIter<'a> {
+
+    /// THe inner iterator over the list of children of a node
+    iter: slice::Iter<'a, Node>,
+}
 
 impl<'a> Iterator for ChildIter<'a> {
 
@@ -454,7 +447,6 @@ impl<'a> Iterator for ChildIter<'a> {
         self.iter.next().map(|node| *node)
     }
 }
-
 
 /// A structure to support the construction of a set of trees, both when parsing Newick strings and
 /// when computing a cluster partition.  The construction guarantees that all leaves with the same
@@ -492,13 +484,12 @@ pub struct TreeBuilder<T> {
     leaf_ids: HashMap<T, Leaf>,
 }
 
-
 impl<T> TreeBuilder<T>
 where T: Clone + Eq + Hash {
 
     /// Create a new tree builder
     pub fn new() -> Self {
-        TreeBuilder {
+        Self {
             current_tree: None,
             trees:        vec![],
             leaf_ids:     HashMap::new(),
@@ -517,34 +508,48 @@ where T: Clone + Eq + Hash {
         let leaf    = self.leaf_ids.entry(label.clone()).or_insert(Leaf::new(leaf_id));
 
         self.current_tree.as_mut().map(|t| {
+
             let node = Node(t.nodes.len());
+
             while t.leaves.len() <= leaf.id() {
                 t.leaves.push(None);
             }
+
             t.leaves[leaf.id()] = Some(Removable::new(node));
+
             t.nodes.push(Removable::new(NodeData {
                 parent: None,
                 data:   TypedNodeData::Leaf(*leaf, label),
             }));
+
             t.node_count += 1;
             t.leaf_count += 1;
+
             node
+
         }).unwrap()
     }
 
     /// Create a new node with the given list of children in the active tree
     pub fn new_node(&mut self, children: Vec<Node>) -> Node {
+
         self.current_tree.as_mut().map(|t| {
+
             let node = Node(t.nodes.len());
+
             for child in &children {
                 t.node_mut(*child).parent = Some(node);
             }
+
             t.nodes.push(Removable::new(NodeData {
                 parent: None,
                 data:   TypedNodeData::Internal(children),
             }));
+
             t.node_count += 1;
+
             node
+
         }).unwrap()
     }
 
@@ -569,8 +574,10 @@ mod tests {
     /// Test that leaf IDs convert correctly
     #[test]
     fn leaf_id() {
+
         let a = Leaf::new(3);
         let b = Leaf::new(8);
+
         assert_eq!(a.id(), 3);
         assert_eq!(b.id(), 8);
     }
@@ -578,8 +585,10 @@ mod tests {
     /// Test that node IDs convert correctly
     #[test]
     fn node_id() {
+
         let a = Node::new(13);
         let b = Node::new(0);
+
         assert_eq!(a.id(), 13);
         assert_eq!(b.id(), 0);
     }
@@ -587,7 +596,9 @@ mod tests {
     /// Test that an initial tree stores nothing
     #[test]
     fn tree_new() {
+
         let tree: Tree<u32> = Tree::new();
+
         assert_eq!(tree.root(), None);
         assert_eq!(tree.node_count(), 0);
         assert_eq!(tree.leaf_count(), 0);
@@ -598,14 +609,18 @@ mod tests {
     /// Test that an initial tree builder generates no trees
     #[test]
     fn tree_builder_new() {
+
         let builder: TreeBuilder<u32> = TreeBuilder::new();
+
         assert!(builder.current_tree.is_none());
         assert_eq!(builder.trees().len(), 0);
     }
 
     /// Build a tree to be used in the remaining tests
     fn build_tree() -> Vec<Tree<u32>> {
+
         let mut builder: TreeBuilder<u32> = TreeBuilder::new();
+
         builder.new_tree();
         let a = builder.new_leaf(5);
         let b = builder.new_leaf(13);
@@ -617,6 +632,7 @@ mod tests {
         let h = builder.new_leaf(8);
         let r = builder.new_node(vec![e, g, h]);
         builder.finish_tree(r);
+
         builder.new_tree();
         let a = builder.new_leaf(13); // 1
         let b = builder.new_leaf(14); // 6
@@ -627,13 +643,16 @@ mod tests {
         let g = builder.new_node(vec![b, f]);
         let r = builder.new_node(vec![g, c]);
         builder.finish_tree(r);
+
         builder.trees()
     }
 
     /// Test the basic stats of the trees built using built_tree
     #[test]
     fn build_tree_basic_stats() {
+
         let trees = build_tree();
+
         assert_eq!(trees.len(), 2);
         assert_eq!(trees[0].node_count(), 9);
         assert_eq!(trees[1].node_count(), 8);
@@ -646,7 +665,9 @@ mod tests {
     /// Test that the leaves are set up right
     #[test]
     fn build_tree_leaves() {
+
         let trees = build_tree();
+
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
         vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(5), Node::new(7)]);
         assert_eq!(trees[0].leaf(Leaf::new(0)), Node::new(0));
@@ -667,6 +688,7 @@ mod tests {
         assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(3))), Some(Leaf::new(3)));
         assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(4))), Some(Leaf::new(4)));
         assert_eq!(trees[0].leaf_id(trees[0].leaf(Leaf::new(5))), Some(Leaf::new(5)));
+
         assert_eq!(trees[1].leaves().collect::<Vec<Node>>(),
         vec![Node::new(0), Node::new(2), Node::new(3), Node::new(1), Node::new(4)]);
         assert_eq!(trees[1].leaf(Leaf::new(1)), Node::new(0));
@@ -689,7 +711,9 @@ mod tests {
     /// Test that the nodes iterator collects all nodes
     #[test]
     fn build_tree_nodes() {
+
         let trees = build_tree();
+
         assert_eq!(trees[0].nodes().collect::<Vec<Node>>(),
         vec![Node::new(0), Node::new(1), Node::new(2), Node::new(3), Node::new(4), 
         Node::new(5), Node::new(6), Node::new(7), Node::new(8)]);
@@ -701,16 +725,19 @@ mod tests {
     /// Test that is_leaf reports the right nodes as leaves
     #[test]
     fn build_tree_is_leaf() {
+
         let trees        = build_tree();
+
         let mut nodes0   = trees[0].nodes();
         let mut answers0 = vec![true, true, true, true, false, true, false, true, false]
-            .into_iter();
-        let mut nodes1   = trees[1].nodes();
-        let mut answers1 = vec![true, true, true, true, true, false, false, false]
             .into_iter();
         for _ in 0..9 {
             assert_eq!(trees[0].is_leaf(nodes0.next().unwrap()), answers0.next().unwrap());
         }
+
+        let mut nodes1   = trees[1].nodes();
+        let mut answers1 = vec![true, true, true, true, true, false, false, false]
+            .into_iter();
         for _ in 0..8 {
             assert_eq!(trees[1].is_leaf(nodes1.next().unwrap()), answers1.next().unwrap());
         }
@@ -719,7 +746,9 @@ mod tests {
     /// Test that the children of each internal node are reported correctly
     #[test]
     fn build_tree_children() {
+
         let trees = build_tree();
+
         assert_eq!(trees[0].children(Node::new(4)).collect::<Vec<Node>>(),
         vec![Node::new(0), Node::new(2), Node::new(3)]);
         assert_eq!(trees[0].children(Node::new(6)).collect::<Vec<Node>>(),
@@ -737,19 +766,22 @@ mod tests {
     /// Test that parents are reported correctly
     #[test]
     fn build_tree_parents() {
+
         let trees        = build_tree();
+
         let mut nodes0   = trees[0].nodes();
         let mut answers0 = [
             Some(4), Some(6), Some(4), Some(4), Some(8), Some(6), Some(8), Some(8), None]
-                .into_iter();
-        let mut nodes1   = trees[1].nodes();
-        let mut answers1 = [
-            Some(5), Some(6), Some(7), Some(5), Some(5), Some(6), Some(7), None]
                 .into_iter();
         for _ in 0..9 {
             assert_eq!(trees[0].parent(nodes0.next().unwrap()),
             answers0.next().unwrap().map(|id| Node::new(id)));
         }
+
+        let mut nodes1   = trees[1].nodes();
+        let mut answers1 = [
+            Some(5), Some(6), Some(7), Some(5), Some(5), Some(6), Some(7), None]
+                .into_iter();
         for _ in 0..8 {
             assert_eq!(trees[1].parent(nodes1.next().unwrap()),
             answers1.next().unwrap().map(|id| Node::new(id)));
@@ -759,13 +791,16 @@ mod tests {
     /// Test that remove_leaf and restore_leaf interact with each other nicely
     #[test]
     fn tree_remove_restore_leaf() {
+
         let mut trees = build_tree();
+
         let leaf1   = Leaf::new(3);
         let leaf2   = Leaf::new(1);
         let parent1 = Node::new(4);
         let parent2 = Node::new(6);
 
         trees[0].prune_leaf(leaf1);
+
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -775,6 +810,7 @@ mod tests {
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
 
         trees[0].prune_leaf(leaf2);
+
         assert_eq!(trees[0].leaf_count(), 4);
         assert_eq!(trees[0].node_count(), 7);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -785,6 +821,7 @@ mod tests {
         assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5)]);
 
         trees[0].restore_leaf(leaf2);
+
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -795,6 +832,7 @@ mod tests {
         assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5), Node(1)]);
 
         trees[0].restore_leaf(leaf1);
+
         assert_eq!(trees[0].leaf_count(), 6);
         assert_eq!(trees[0].node_count(), 9);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -807,6 +845,7 @@ mod tests {
         assert_eq!(trees[0].children(parent2).collect::<Vec<Node>>(), vec![Node(5), Node(1)]);
 
         trees[0].prune_leaf(leaf1);
+
         assert_eq!(trees[0].leaf_count(), 5);
         assert_eq!(trees[0].node_count(), 8);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -816,6 +855,7 @@ mod tests {
         assert_eq!(trees[0].children(parent1).collect::<Vec<Node>>(), vec![Node(0), Node(2)]);
 
         trees[0].prune_leaf(leaf2);
+
         assert_eq!(trees[0].leaf_count(), 4);
         assert_eq!(trees[0].node_count(), 7);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(), vec![
@@ -829,16 +869,20 @@ mod tests {
     /// Check that suppressing and restoring nodes does the right thing
     #[test]
     fn tree_suppress_restore_node() {
+
         let mut trees = build_tree();
+
         let leaf1   = Leaf::new(0);
         let leaf2   = Leaf::new(3);
         let leaf3   = Leaf::new(4);
         let node1   = Node::new(4);
         let node2   = Node::new(6);
         let parent  = Node::new(8);
+
         trees[0].prune_leaf(leaf1);
         trees[0].prune_leaf(leaf2);
         trees[0].prune_leaf(leaf3);
+
         assert_eq!(trees[0].leaf_count(), 3);
         assert_eq!(trees[0].node_count(), 6);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
@@ -847,6 +891,7 @@ mod tests {
         vec![Node::new(1), Node::new(2), Node::new(4), Node::new(6), Node::new(7), Node::new(8)]);
 
         trees[0].suppress_node(node1);
+
         assert_eq!(trees[0].leaf_count(), 3);
         assert_eq!(trees[0].node_count(), 5);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
@@ -857,6 +902,7 @@ mod tests {
         vec![Node::new(2), Node::new(6), Node::new(7)]);
 
         trees[0].suppress_node(node2);
+
         assert_eq!(trees[0].leaf_count(), 3);
         assert_eq!(trees[0].node_count(), 4);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
@@ -867,6 +913,7 @@ mod tests {
         vec![Node::new(2), Node::new(1), Node::new(7)]);
 
         trees[0].restore_node(node2);
+
         assert_eq!(trees[0].leaf_count(), 3);
         assert_eq!(trees[0].node_count(), 5);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
@@ -877,6 +924,7 @@ mod tests {
         vec![Node::new(2), Node::new(6), Node::new(7)]);
 
         trees[0].restore_node(node1);
+
         assert_eq!(trees[0].leaf_count(), 3);
         assert_eq!(trees[0].node_count(), 6);
         assert_eq!(trees[0].leaves().collect::<Vec<Node>>(),
