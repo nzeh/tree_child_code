@@ -56,8 +56,9 @@ impl<T: Clone + Send + 'static> Master<T> {
         let search             = Search::new(trees, limit_fanout, use_rendundant_branch_opt);
         let (sender, receiver) = channel();
         let waiting            = Arc::new(RwLock::new(vec![]));
-        let workers            = (0..num_workers).map(
-            |i| Worker::new(i, num_workers, poll_delay, waiting.clone(), sender.clone())).collect();
+        let workers            = (0..num_workers)
+            .map(|i| Worker::new(i, num_workers, poll_delay, waiting.clone(), sender.clone()))
+            .collect();
 
         Master { search, workers, waiting, queue: receiver }
     }
@@ -101,9 +102,7 @@ impl<T: Clone + Send + 'static> Master<T> {
     /// Stop all workers
     fn stop_workers(&mut self) {
         let workers = mem::replace(&mut self.workers, vec![]);
-        for worker in workers {
-            worker.quit();
-        }
+        for worker in workers { worker.quit(); }
     }
 }
 
@@ -118,6 +117,7 @@ mod tests {
     /// Test run
     #[test]
     fn run() {
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick =
@@ -126,10 +126,12 @@ mod tests {
             builder.trees()
         };
         let master = Master::new(trees, 32, Some(1), true, true);
-        let seq = master.run();
+        let seq    = master.run();
+
         assert_eq!(seq.len(), 7);
+
         let mut string = String::new();
-        let mut first = true;
+        let mut first  = true;
         write!(&mut string, "<").unwrap();
         for pair in seq {
             if first {
@@ -140,6 +142,7 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
+
         assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
     }
 }

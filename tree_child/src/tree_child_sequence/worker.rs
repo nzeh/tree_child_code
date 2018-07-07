@@ -70,8 +70,9 @@ impl<T: Clone + Send + 'static> Worker<T> {
         result:      Sender<FromWorker<T>>) -> Self {
 
         let (queue, work) = channel();
-        let worker_state = WorkerState { id, num_workers, poll_delay, waiting, work, result };
-        let thread = thread::spawn(move || worker_state.run());
+        let worker_state  = WorkerState { id, num_workers, poll_delay, waiting, work, result };
+        let thread        = thread::spawn(move || worker_state.run());
+
         Worker { thread, queue }
     }
 
@@ -91,8 +92,12 @@ impl<T: Clone> WorkerState<T> {
 
     /// Recursively search for a tree-child sequence
     fn run(self) {
+
+        // Go into idle state until we receive the first work package
         self.send_result(None);
+
         loop {
+
             match self.work.recv().unwrap() {
 
                 // Exit on receiving an empty message
@@ -118,45 +123,57 @@ impl<T: Clone> WorkerState<T> {
             search.start_branch();
 
             if let Some(poll_delay) = self.poll_delay {
-                // If we should poll for idle threads, do this.
-                'l: loop {
-
-                    // Run as many branching steps as indicated by poll_delay
-                    for _ in 0..poll_delay {
-                        if !search.branch() {
-                            break 'l
-                        }
-                    }
-
-                    // Now check whether there's an idle thread, first cheaply using a read lock.
-                    if self.waiting.read().unwrap().len() > 0 {
-
-                        // Try to pop a waiting thread of the waiting queue.  This may fail if some
-                        // other thread grabbed it first
-                        let recipient = self.waiting.write().unwrap().pop();
-
-                        // If we did grab an idle thread, then ...
-                        if let Some(recipient) = recipient {
-                            if let Some(other_search) = search.split() {
-                                // ... share some work with it if we have any.
-                                self.share_work(recipient, other_search);
-                            } else {
-                                // ... push it back onto the idle queue if we don't have any work
-                                // for it.
-                                self.waiting.write().unwrap().push(recipient);
-                            }
-                        }
-                    }
-                }
+                self.run_search_cooperatively(&mut search, poll_delay);
             } else {
-                // Otherwise, just run the search until done
-                while search.branch() {}
+                self.run_search_alone(&mut search);
             }
 
             // Return the tree-child sequence if we found one
             search.tc_seq()
+
         } else {
+
             None
+        }
+
+    }
+
+    /// Run the search without interacting with other workers
+    fn run_search_alone(&self, search: &mut Search<T>) {
+        while search.branch() {}
+    }
+
+    /// Run the search in cooperation with other threads
+    fn run_search_cooperatively(&self, search: &mut Search<T>, poll_delay: usize) {
+
+        'l: loop {
+
+            // Run as many branching steps as indicated by poll_delay
+            for _ in 0..poll_delay {
+                if !search.branch() {
+                    break 'l
+                }
+            }
+
+            // Now check whether there's an idle thread.
+            if self.waiting.read().unwrap().len() > 0 {
+
+                // Try to pop a waiting thread of the waiting queue.  This may fail if some
+                // other thread grabbed it first.
+                let recipient = self.waiting.write().unwrap().pop();
+
+                // If we did grab an idle thread, then ...
+                if let Some(recipient) = recipient {
+
+                    if let Some(other_search) = search.split() {
+                        // ... share some work with it if we have any.
+                        self.share_work(recipient, other_search);
+                    } else {
+                        // ... push it back onto the idle queue if we don't have any work for it.
+                        self.waiting.write().unwrap().push(recipient);
+                    }
+                }
+            }
         }
     }
 
@@ -164,16 +181,16 @@ impl<T: Clone> WorkerState<T> {
     fn send_result(&self, result: Option<TcSeq<T>>) {
 
         // We're done, go into idle state
-        let mut waiting = self.waiting.write().unwrap();
-        waiting.push(self.id);
+        let is_last_idle_thread = {
+            let mut waiting = self.waiting.write().unwrap();
+            waiting.push(self.id);
+            waiting.len() == self.num_workers
+        };
 
-        if result.is_some() {
-            // If the search was successful, send the result to the master
+        // Send result to master if the search was successful or this is the last idle thread and a
+        // new search should start.
+        if result.is_some() || is_last_idle_thread {
             self.result.send(FromWorker::Result(result)).unwrap();
-        } else if waiting.len() == self.num_workers {
-            // Otherwise, send `None` back to the master to indicate a failed search only if this
-            // is the last idle thread.
-            self.result.send(FromWorker::Result(None)).unwrap();
         }
     }
 
@@ -194,23 +211,25 @@ mod tests {
     /// Test starting and stopping threads
     #[test]
     fn start_stop_workers() {
+
         const NUM_WORKERS: usize        = 32;
         let (sender, receiver)          = channel();
         let waiting                     = Arc::new(RwLock::new(vec![]));
         let workers: Vec<Worker<usize>> = (0..NUM_WORKERS).map(
             |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
+
         match receiver.recv().unwrap() {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
         }
-        for worker in workers {
-            worker.quit();
-        }
+
+        for worker in workers { worker.quit(); }
     }
 
     /// Test successful search with parameter 0
     #[test]
     fn search_0_success() {
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,g),(b,(c,e)));\n";
@@ -218,11 +237,16 @@ mod tests {
             newick::parse_forest(&mut builder, &newick).unwrap();
             builder.trees()
         };
+
         let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
+
         assert!(search.success());
+
         let seq = search.tc_seq().unwrap();
+
         assert_eq!(seq.len(), 5);
+
         let mut string = String::new();
         let mut first = true;
         write!(&mut string, "<").unwrap();
@@ -235,21 +259,24 @@ mod tests {
             write!(&mut string, "{}", pair).unwrap();
         }
         write!(&mut string, ">").unwrap();
+
         assert_eq!(string, "<(c, e), (b, e), (a, g), (g, e), (e, -)>");
     }
 
     /// Test unsuccessful search with parameter 0
     #[test]
     fn search_0_fail() {
-        // Create search state and check that it's non-trivial
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,b),c);\n(a,(b,c));\n";
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
+
         let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
+
         assert!(!search.success());
 
         const NUM_WORKERS: usize         = 32;
@@ -261,20 +288,24 @@ mod tests {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
         }
+
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
+
         loop {
+
             match receiver.recv().unwrap() {
+
                 FromWorker::Result(None) => {
-                    for worker in workers {
-                        worker.quit();
-                    }
+                    for worker in workers { worker.quit(); }
                     return;
                 },
-                FromWorker::Result(Some(_)) => {
-                    panic!("search_0_fail should have failed");
-                },
-                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+
+                FromWorker::Result(Some(_)) =>
+                    panic!("search_0_fail should have failed"),
+
+                FromWorker::WorkPackage(recipient, search) =>
+                    workers[recipient].work_on(search),
             }
         }
     }
@@ -282,15 +313,17 @@ mod tests {
     /// Test successful search with parameter 1
     #[test]
     fn search_1_success() {
-        // Create a search state and check that it's non-trivial
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick = "((a,b),c);\n(a,(b,c));\n";
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
+
         let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
+
         assert!(!search.success());
 
         search.increase_max_weight();
@@ -303,15 +336,20 @@ mod tests {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
         }
+
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
+
         loop {
+
             match receiver.recv().unwrap() {
+
                 FromWorker::Result(Some(seq)) => {
-                    for worker in workers {
-                        worker.quit();
-                    }
+
+                    for worker in workers { worker.quit(); }
+
                     assert_eq!(seq.len(), 4);
+
                     let mut string = String::new();
                     let mut first = true;
                     write!(&mut string, "<").unwrap();
@@ -324,13 +362,17 @@ mod tests {
                         write!(&mut string, "{}", pair).unwrap();
                     }
                     write!(&mut string, ">").unwrap();
+
                     assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
+
                     return;
                 },
-                FromWorker::Result(None) => {
-                    panic!("search_1_success should have succeeded");
-                },
-                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+
+                FromWorker::Result(None) =>
+                    panic!("search_1_success should have succeeded"),
+
+                FromWorker::WorkPackage(recipient, search) =>
+                    workers[recipient].work_on(search),
             }
         }
     }
@@ -338,7 +380,7 @@ mod tests {
     /// Test unsuccessful search with parameter 1
     #[test]
     fn search_1_fail() {
-        // Create a search state and check that it's non-trivial
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick =
@@ -346,8 +388,10 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
+
         let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
+
         assert!(!search.success());
 
         search.increase_max_weight();
@@ -360,20 +404,24 @@ mod tests {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
         }
+
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
+
         loop {
+
             match receiver.recv().unwrap() {
+
                 FromWorker::Result(None) => {
-                    for worker in workers {
-                        worker.quit();
-                    }
+                    for worker in workers { worker.quit(); }
                     return;
                 },
-                FromWorker::Result(Some(_)) => {
-                    panic!("search_1_fail should have failed");
-                },
-                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+
+                FromWorker::Result(Some(_)) =>
+                    panic!("search_1_fail should have failed"),
+
+                FromWorker::WorkPackage(recipient, search) =>
+                    workers[recipient].work_on(search),
             }
         }
     }
@@ -381,7 +429,7 @@ mod tests {
     /// Test successful search with parameter 2
     #[test]
     fn search_2_success() {
-        // Create a search state and check that it's non-trivial
+
         let trees = {
             let mut builder = TreeBuilder::<String>::new();
             let newick =
@@ -389,8 +437,10 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
+
         let mut search = Search::new(trees, true, true);
         search.resolve_trivial_cherries();
+
         assert!(!search.success());
 
         search.increase_max_weight();
@@ -404,15 +454,19 @@ mod tests {
             FromWorker::Result(res) => assert!(res.is_none()),
             _                       => panic!("Expected a result, not a workload"),
         }
+
         let i = waiting.write().unwrap().pop().unwrap();
         workers[i].work_on(search);
+
         loop {
+
             match receiver.recv().unwrap() {
+
                 FromWorker::Result(Some(seq)) => {
-                    for worker in workers {
-                        worker.quit();
-                    }
+                    for worker in workers { worker.quit(); }
+
                     assert_eq!(seq.len(), 7);
+
                     let mut string = String::new();
                     let mut first = true;
                     write!(&mut string, "<").unwrap();
@@ -425,13 +479,17 @@ mod tests {
                         write!(&mut string, "{}", pair).unwrap();
                     }
                     write!(&mut string, ">").unwrap();
+
                     assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+
                     return;
                 },
-                FromWorker::Result(None) => {
-                    panic!("search_1_success should have succeeded");
-                },
-                FromWorker::WorkPackage(recipient, search) => workers[recipient].work_on(search),
+
+                FromWorker::Result(None) =>
+                    panic!("search_1_success should have succeeded"),
+
+                FromWorker::WorkPackage(recipient, search) =>
+                    workers[recipient].work_on(search),
             }
         }
     }
