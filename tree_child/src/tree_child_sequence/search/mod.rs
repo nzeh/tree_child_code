@@ -39,28 +39,6 @@ pub struct Search<T> {
     use_redundant_branch_opt: bool,
 }
 
-/// A branch point is defined by a snapshot of the state before the branch, an index of the
-/// non-trivial cherry to resolve next, and a Boolean flag that indicates whether we're cutting
-/// the first leaf.
-#[derive(Clone)]
-struct BranchPoint {
-
-    /// The history snapshot before branching
-    snapshot: Snapshot,
-
-    /// The index of the cherry to resolve
-    cherry: usize,
-
-    /// Are we branching on the first leaf of the cherry?
-    first_leaf: bool,
-
-    /// Number of branches left to explore
-    num_branches_left: usize,
-
-    /// Number of branches that were moved to other threads
-    num_skipped_branches: usize,
-}
-
 impl<T: Clone> Search<T> {
 
     //----------------------------------------------------------------------------------------------
@@ -69,7 +47,7 @@ impl<T: Clone> Search<T> {
 
     /// Create a new search state
     pub fn new(trees: Vec<Tree<T>>, limit_fanout: bool, use_redundant_branch_opt: bool) -> Self {
-        Search {
+        Self {
             state:   State::new(trees),
             history: History::new(),
             stack:   VecDeque::new(),
@@ -85,23 +63,37 @@ impl<T: Clone> Search<T> {
 
     /// Split off part of the work of this search into a new instance
     pub fn split(&mut self) -> Option<Self> {
+
         while !self.stack.is_empty() {
+
+            // Make a copy of this search
             let mut other_search = self.clone();
+
+            // Skip the next top branch in this search
             self.skip_next_top_branch();
+
+            // Limit the copy to the skipped top branch and return that branch unless it is not a
+            // feasible branch
             if other_search.limit_to_next_top_branch() {
                 return Some(other_search);
             }
         }
+
+        // No feasible branches found, return nothing
         None
     }
 
     /// Make sure this search does not follow the next available branch at the topmost branch point
     fn skip_next_top_branch(&mut self) {
+
+        // Skip the next top branch and record whether we've now skipped all top braches
         let all_branches_skipped = {
             let top_branch = &mut self.stack[0];
             top_branch.num_skipped_branches += 1;
             top_branch.num_skipped_branches == top_branch.num_branches_left
         };
+
+        // If so, remove the topmost branch point
         if all_branches_skipped {
             self.stack.pop_front();
         }
@@ -110,13 +102,21 @@ impl<T: Clone> Search<T> {
     /// Rewind this search to its topmost branch point and limit the search to the next available
     /// branch at this branch point
     fn limit_to_next_top_branch(&mut self) -> bool {
+
+        // Pop all but the topmost branch point
         self.stack.truncate(1);
+
+        // Go to the next branch at this branch point
         self.branch();
-        self.history.clear();
+
+        // If this branch is feasible (it was pushed on the stack)
         if self.stack.len() > 1 {
+            // ... forget how we got here and report success
+            self.history.clear();
             self.stack.clear();
             true
         } else {
+            // Otherwise, report failure.
             false
         }
     }
@@ -127,17 +127,23 @@ impl<T: Clone> Search<T> {
 
     /// Check whether the search is done and push the final tree-child pair if this is the case.
     pub fn success(&mut self) -> bool {
+
         if let Some(leaf) = self.state.final_leaf() {
+
+            // Only one leaf left.  Push it and record success.
             self.state.push_final_tree_child_pair(leaf);
             self.success = true;
             true
+
         } else {
+
+            // Nope, not done yet because we have more than one leaf left.
             false
         }
     }
 
     /// The search can succeed only if we haven't reached the maximum weight yet and we have at
-    /// most 4*max_weight non-trivial cherries
+    /// most 4*max_weight non-trivial cherries (not checked if `self.limit_fanout` is unset).
     pub fn can_succeed(&self) -> bool {
         self.state.weight() < self.state.max_weight() &&
             (!self.limit_fanout ||
@@ -145,9 +151,11 @@ impl<T: Clone> Search<T> {
     }
 
     /// Create a new branch point and return a snapshot of the state at the time of the branch
-    pub fn start_branch(&mut self) -> Snapshot {
+    pub fn start_branch(&mut self) {
+
         let snapshot          = self.history.take_snapshot();
         let num_branches_left = 2 * self.state.num_non_trivial_cherries();
+
         self.stack.push_back(BranchPoint {
             snapshot,
             cherry:               0,
@@ -155,7 +163,6 @@ impl<T: Clone> Search<T> {
             num_branches_left,
             num_skipped_branches: 0,
         });
-        snapshot
     }
 
     /// Try the next branch and return true if there are more branches left to explore
@@ -293,15 +300,15 @@ impl<T: Clone> Search<T> {
     fn rewind_to_snapshot(&mut self, snapshot: Snapshot) {
         for op in self.history.rewind(snapshot) {
             match op {
-                Op::PushTrivialCherry                     => self.undo_push_trivial_cherry(),
-                Op::PopTrivialCherry(cherry)              => self.undo_pop_trivial_cherry(cherry),
-                Op::RemoveCherry(cherry_ref, cherry)      => self.undo_remove_cherry(cherry_ref, cherry),
-                Op::RecordCherry(recorded, moved)         => self.undo_record_cherry(recorded, moved),
-                Op::PruneLeaf(leaf, tree)                 => self.undo_prune_leaf(leaf, tree),
-                Op::SuppressNode(node, tree)              => self.undo_suppress_node(node, tree),
-                Op::PushTreeChildPair                     => self.undo_push_tree_child_pair(),
-                Op::IncreaseWeight                        => self.undo_increase_weight(),
-                Op::Cut(cherry, first_leaf, cut_count)    => self.undo_cut(cherry, first_leaf, cut_count),
+                Op::PushTrivialCherry                  => self.undo_push_trivial_cherry(),
+                Op::PopTrivialCherry(cherry)           => self.undo_pop_trivial_cherry(cherry),
+                Op::RemoveCherry(cherry_ref, cherry)   => self.undo_remove_cherry(cherry_ref, cherry),
+                Op::RecordCherry(recorded, moved)      => self.undo_record_cherry(recorded, moved),
+                Op::PruneLeaf(leaf, tree)              => self.undo_prune_leaf(leaf, tree),
+                Op::SuppressNode(node, tree)           => self.undo_suppress_node(node, tree),
+                Op::PushTreeChildPair                  => self.undo_push_tree_child_pair(),
+                Op::IncreaseWeight                     => self.undo_increase_weight(),
+                Op::Cut(cherry, first_leaf, cut_count) => self.undo_cut(cherry, first_leaf, cut_count),
             }
         }
     }
@@ -453,6 +460,28 @@ impl<T: Clone> Search<T> {
     }
 }
 
+/// A branch point is defined by a snapshot of the state before the branch, an index of the
+/// non-trivial cherry to resolve next, and a Boolean flag that indicates whether we're cutting
+/// the first leaf.
+#[derive(Clone)]
+struct BranchPoint {
+
+    /// The history snapshot before branching
+    snapshot: Snapshot,
+
+    /// The index of the cherry to resolve
+    cherry: usize,
+
+    /// Are we branching on the first leaf of the cherry?
+    first_leaf: bool,
+
+    /// Number of branches left to explore
+    num_branches_left: usize,
+
+    /// Number of branches that were moved to other threads
+    num_skipped_branches: usize,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -463,8 +492,10 @@ mod tests {
     /// Test that the initial search state is initialized correctly
     #[test]
     fn new() {
+
         let (trees, newicks) = state::tests::build_forest();
-        let search = Search::new(trees, true, true);
+        let search           = Search::new(trees, true, true);
+
         state::tests::test_new(search.state, newicks);
         assert!(history::tests::ops(&search.history).is_empty());
     }
@@ -472,13 +503,19 @@ mod tests {
     /// Test that increase_weight and undo_increase_weight are correct counterparts of each other
     #[test]
     fn do_undo_increase_weight() {
+
         let (trees, _) = state::tests::build_forest();
         let mut search = Search::new(trees, true, true);
+
         let snapshot = search.history.take_snapshot();
+
         search.increase_weight();
+
         assert_eq!(search.state.weight(), 1);
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::IncreaseWeight]);
+
         search.rewind_to_snapshot(snapshot);
+
         assert_eq!(search.state.weight(), 0);
         assert!(history::tests::ops(&search.history).is_empty());
     }
@@ -487,21 +524,29 @@ mod tests {
     /// each other
     #[test]
     fn do_undo_push_tree_child_pair() {
+
         let (trees, _) = state::tests::build_forest();
         let mut search = Search::new(trees, true, true);
+
         let snapshot0 = search.history.take_snapshot();
+
         let u1 = Leaf::new(4);
         let v1 = Leaf::new(3);
         let u2 = Leaf::new(1);
         let v2 = Leaf::new(5);
         let u3 = Leaf::new(1);
         let v3 = Leaf::new(6);
+
         search.push_tree_child_pair(u1, v1);
+
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
         assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
+
         let snapshot1 = search.history.take_snapshot();
+
         search.push_tree_child_pair(u2, v2);
         search.push_tree_child_pair(u3, v3);
+
         assert_eq!(history::tests::ops(&search.history), &vec![
                    history::Op::PushTreeChildPair, history::Op::PushTreeChildPair,
                    history::Op::PushTreeChildPair]);
@@ -510,10 +555,14 @@ mod tests {
                    Pair::Reduce(u2, v2),
                    Pair::Reduce(u3, v3)
         ]);
+
         search.rewind_to_snapshot(snapshot1);
+
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
         assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
+
         search.rewind_to_snapshot(snapshot0);
+
         assert!(history::tests::ops(&search.history).is_empty());
         assert!(state::tests::tc_seq(&search.state).is_empty());
     }
@@ -522,10 +571,13 @@ mod tests {
     /// of each other
     #[test]
     fn do_undo_prune_leaf_suppress_node() {
+
         let (trees, newicks) = state::tests::build_forest();
-        let mut search = Search::new(trees, true, true);
+        let mut search       = Search::new(trees, true, true);
+
         let d = Leaf::new(2);
         let e = Leaf::new(6);
+
         let newick0_0 = newicks[0].clone();
         let newick1_0 = newicks[1].clone();
         let newick2   = newicks[2].clone();
@@ -533,28 +585,41 @@ mod tests {
         let newick0_2 = String::from("((a,c),((b,f),(g,h)));");
         let newick1_1 = String::from("((a,c),(((e,g),(h,f)),b));");
         let newick1_2 = String::from("((a,(c,d)),(((e,g),(h,f)),b));");
+
         let snapshot0 = search.history.take_snapshot();
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_0.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_0.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
+
         search.prune_leaf(d, 0);
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_1.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_0.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
+
         search.prune_leaf(e, 0);
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_0.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
+
         let snapshot1 = search.history.take_snapshot();
+
         search.prune_leaf(d, 1);
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_1.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
+
         search.rewind_to_snapshot(snapshot1);
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
+
         search.rewind_to_snapshot(snapshot0);
+
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick0_0.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick1_2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick2.clone()));
@@ -563,10 +628,13 @@ mod tests {
     /// Test that remove_cherry and undo_remove_(trivial|non_trivial)_cherry are inverses
     #[test]
     fn do_undo_remove_cherry() {
+
         let (trees, _) = state::tests::build_forest();
         let mut search = Search::new(trees, true, true);
         let empty_vec: Vec<&cherry::Ref> = vec![];
+
         let snapshot0 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -610,7 +678,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.remove_cherry(cherry::Ref::Trivial(0));
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -647,8 +717,11 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         let snapshot1 = search.history.take_snapshot();
+
         search.remove_cherry(cherry::Ref::NonTrivial(1));
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -679,7 +752,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 2).indices(), (0, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 2).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot1);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -716,7 +791,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot0);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -765,10 +842,13 @@ mod tests {
     /// Test that push/pop_trivial_cherry and undo_push/pop_trivial_cherry are inverses
     #[test]
     fn do_undo_push_pop_trivial_cherry() {
+
         let (trees, _) = state::tests::build_forest();
         let mut search = Search::new(trees, true, true);
         let empty_vec: Vec<&cherry::Ref> = vec![];
+
         let snapshot0 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -812,8 +892,11 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.push_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 0));
+
         let snapshot1 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -862,8 +945,11 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.pop_trivial_cherry();
+
         let snapshot2 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -907,7 +993,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.pop_trivial_cherry();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -944,7 +1032,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot2);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -988,7 +1078,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot1);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1037,7 +1129,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot0);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1086,9 +1180,12 @@ mod tests {
     /// Test that record_cherry and undo_record_cherry are inverses
     #[test]
     fn do_undo_record_cherry() {
+
         let (trees, _) = state::tests::build_forest();
         let mut search = Search::new(trees, true, true);
+
         let snapshot0 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1132,8 +1229,11 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.record_cherry(Leaf::new(4), Leaf::new(7), 0);
+
         let snapshot1 = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1177,7 +1277,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.record_cherry(Leaf::new(4), Leaf::new(7), 2);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1221,7 +1323,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 2).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 2).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot1);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1265,7 +1369,9 @@ mod tests {
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).indices(), (1, 0));
         assert_eq!(state::tests::non_trivial_cherry(&search.state, 3).trees().collect::<Vec<&usize>>(),
         vec![&1]);
+
         search.rewind_to_snapshot(snapshot0);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1314,15 +1420,20 @@ mod tests {
     /// Test that resolve_trivial_cherries resolves trivial cherries correctly
     #[test]
     fn resolve_trivial_cherries() {
+
         let (trees, newicks) = state::tests::build_forest();
-        let mut search = Search::new(trees, true, true);
-        let newick1 = String::from("(((a,c),d),((b,f),(e,h)));");
-        let newick2 = String::from("((a,(d,c)),((e,(h,f)),b));");
-        let newick3 = String::from("((((h,(f,(e,c))),b),a),d);");
+        let mut search       = Search::new(trees, true, true);
+
+        let newick1          = String::from("(((a,c),d),((b,f),(e,h)));");
+        let newick2          = String::from("((a,(d,c)),((e,(h,f)),b));");
+        let newick3          = String::from("((((h,(f,(e,c))),b),a),d);");
         let newick1_restored = String::from("(((a,c),d),((b,f),((e,g),h)));");
         let newick3_restored = String::from("((((h,(f,((e,g),c))),b),a),d);");
+
         let empty_vec: Vec<&cherry::Ref> = vec![];
+
         let snapshot = search.history.take_snapshot();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1369,7 +1480,9 @@ mod tests {
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newicks[0].clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newicks[1].clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newicks[2].clone()));
+
         search.resolve_trivial_cherries();
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1420,7 +1533,9 @@ mod tests {
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 0)), Some(newick1.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 1)), Some(newick2.clone()));
         assert_eq!(newick::format_tree(state::tests::tree(&search.state, 2)), Some(newick3.clone()));
+
         search.rewind_to_snapshot(snapshot);
+
         assert_eq!(state::tests::leaf(&search.state, 0).cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state::tests::leaf(&search.state, 1).cherries().collect::<Vec<&cherry::Ref>>(), vec![
