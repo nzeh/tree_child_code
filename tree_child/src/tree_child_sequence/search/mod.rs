@@ -295,8 +295,7 @@ impl<T: Clone> Search<T> {
             match op {
                 Op::PushTrivialCherry                     => self.undo_push_trivial_cherry(),
                 Op::PopTrivialCherry(cherry)              => self.undo_pop_trivial_cherry(cherry),
-                Op::RemoveTrivialCherry(index, cherry)    => self.undo_remove_trivial_cherry(index, cherry),
-                Op::RemoveNonTrivialCherry(index, cherry) => self.undo_remove_non_trivial_cherry(index, cherry),
+                Op::RemoveCherry(cherry_ref, cherry)      => self.undo_remove_cherry(cherry_ref, cherry),
                 Op::RecordCherry(recorded, moved)         => self.undo_record_cherry(recorded, moved),
                 Op::PruneLeaf(leaf, tree)                 => self.undo_prune_leaf(leaf, tree),
                 Op::SuppressNode(node, tree)              => self.undo_suppress_node(node, tree),
@@ -349,29 +348,13 @@ impl<T: Clone> Search<T> {
     /// Remove a cherry indexed by the given cherry reference
     fn remove_cherry(&mut self, cherry_ref: cherry::Ref) -> cherry::Cherry {
         let cherry = self.state.remove_cherry(cherry_ref);
-
-        match cherry_ref {
-
-            cherry::Ref::Trivial(ix) => {
-                self.history.record_op(Op::RemoveTrivialCherry(ix, cherry.clone()));
-            },
-
-            cherry::Ref::NonTrivial(ix) => {
-                self.history.record_op(Op::RemoveNonTrivialCherry(ix, cherry.clone()));
-            },
-        }
-
+        self.history.record_op(Op::RemoveCherry(cherry_ref, cherry.clone()));
         cherry
     }
 
-    /// Undo the removal of a trivial cherry
-    fn undo_remove_trivial_cherry(&mut self, ix: usize, cherry: cherry::Cherry) {
-        self.state.restore_trivial_cherry(ix, cherry);
-    }
-
-    /// Undo the removal of a non-trivial cherry
-    fn undo_remove_non_trivial_cherry(&mut self, ix: usize, cherry: cherry::Cherry) {
-        self.state.restore_non_trivial_cherry(ix, cherry);
+    /// Undo the removal of a cherry
+    fn undo_remove_cherry(&mut self, cherry_ref: cherry::Ref, cherry: cherry::Cherry) {
+        self.state.restore_cherry(cherry_ref, cherry);
     }
 
     /// Record a cut of a leaf in a cherry

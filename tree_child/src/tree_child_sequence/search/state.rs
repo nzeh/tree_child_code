@@ -156,12 +156,12 @@ impl<T: Clone> State<T> {
             // Completely remove the cherry if it no longer occurs in any tree
             self.remove_cherry(forget);
 
-        } else if let Some(cherry::Ref::NonTrivial(restore)) = restore {
+        } else if let Some(restore) = restore {
 
             // If the cherry was moved from the list of non-trivial cherries to the list of trivial
             // cherries when recording it, it needs to be moved back now.
             let cherry = self.remove_cherry(forget);
-            self.restore_non_trivial_cherry(restore, cherry);
+            self.restore_cherry(restore, cherry);
         }
     }
 
@@ -308,53 +308,54 @@ impl<T: Clone> State<T> {
         cherry
     }
 
-    /// Restore a cherry to its original position in the list of trivial cherries
-    pub fn restore_trivial_cherry(&mut self, index: usize, mut cherry: cherry::Cherry) {
+    /// Restore a cherry to its original position in one of the two cherry lists
+    pub fn restore_cherry(&mut self, cherry_ref: cherry::Ref, mut cherry: cherry::Cherry) {
 
         // Restore references to the cherry to be restored
         let (u, v)     = cherry.leaves();
         let (uix, vix) = cherry.indices();
-        self.restore_cherry_ref(u, uix, cherry::Ref::Trivial(index));
-        self.restore_cherry_ref(v, vix, cherry::Ref::Trivial(index));
+        self.restore_cherry_ref(u, uix, cherry_ref);
+        self.restore_cherry_ref(v, vix, cherry_ref);
 
-        // If the position is at the end of the list, then simply push the cherry; otherwise, do a
-        // swap_remove in reverse.
-        let num_cherries = self.trivial_cherries.len();
-        if index < num_cherries {
-            mem::swap(&mut cherry, &mut self.trivial_cherries[index]);
-            let (x, y)     = cherry.leaves();
-            let (xix, yix) = cherry.indices();
-            self.leaf_mut(x).replace_cherry(xix, cherry::Ref::Trivial(num_cherries));
-            self.leaf_mut(y).replace_cherry(yix, cherry::Ref::Trivial(num_cherries));
+        let (updates, ref_to_end) = {
+
+            let (cherries, ix, ref_to_end) = match cherry_ref {
+
+                cherry::Ref::Trivial(ix) => {
+                    let num_cherries = self.trivial_cherries.len();
+                    let ref_to_end   = cherry::Ref::Trivial(num_cherries);
+                    (&mut self.trivial_cherries, ix, ref_to_end)
+                },
+
+                cherry::Ref::NonTrivial(ix) => {
+                    let num_cherries = self.non_trivial_cherries.len();
+                    let ref_to_end   = cherry::Ref::NonTrivial(num_cherries);
+                    (&mut self.non_trivial_cherries, ix, ref_to_end)
+                },
+            };
+
+            let updates = if cherry_ref < ref_to_end {
+                mem::swap(&mut cherries[ix], &mut cherry);
+                Some((cherry.leaves(), cherry.indices()))
+            } else {
+                None
+            };
+            cherries.push(cherry);
+
+            (updates, ref_to_end)
+        };
+
+        if let Some(((x, y), (xix, yix))) = updates {
+            self.leaf_mut(x).replace_cherry(xix, ref_to_end);
+            self.leaf_mut(y).replace_cherry(yix, ref_to_end);
         }
-        self.trivial_cherries.push(cherry);
-    }
-
-    /// Restore a cherry to its original position in the list of non-trivial cherries
-    pub fn restore_non_trivial_cherry(&mut self, index: usize, mut cherry: cherry::Cherry) {
-
-        // Restore references to the cherry to be restored
-        let (u, v)     = cherry.leaves();
-        let (uix, vix) = cherry.indices();
-        self.restore_cherry_ref(u, uix, cherry::Ref::NonTrivial(index));
-        self.restore_cherry_ref(v, vix, cherry::Ref::NonTrivial(index));
-
-        // If the position is at the end of the list, then simply push the cherry; otherwise, do a
-        // swap_remove in reverse.
-        let num_cherries = self.non_trivial_cherries.len();
-        if index < num_cherries {
-            mem::swap(&mut cherry, &mut self.non_trivial_cherries[index]);
-            let (x, y)     = cherry.leaves();
-            let (xix, yix) = cherry.indices();
-            self.leaf_mut(x).replace_cherry(xix, cherry::Ref::NonTrivial(num_cherries));
-            self.leaf_mut(y).replace_cherry(yix, cherry::Ref::NonTrivial(num_cherries));
-        }
-        self.non_trivial_cherries.push(cherry);
     }
 
     /// Remove the `index`th cherry reference associated with `leaf`
     fn remove_cherry_ref(&mut self, leaf: Leaf, index: usize) {
+
         self.leaf_mut(leaf).remove_cherry(index);
+
         if index < self.leaf(leaf).num_cherries() {
             let cherry_ref = self.leaf(leaf).cherry(index);
             self.cherry_mut(cherry_ref).set_index(leaf, index);
@@ -363,11 +364,14 @@ impl<T: Clone> State<T> {
 
     /// Restore the `index`th cherry reference associated with `leaf`
     fn restore_cherry_ref(&mut self, leaf: Leaf, index: usize, mut cherry_ref: cherry::Ref) {
+
         let num_cherries = self.leaf(leaf).num_cherries();
+
         if index < num_cherries {
             mem::swap(&mut cherry_ref, self.leaf_mut(leaf).cherry_mut(index));
             self.cherry_mut(cherry_ref).set_index(leaf, num_cherries);
         }
+
         self.leaf_mut(leaf).add_cherry(cherry_ref);
     }
 
@@ -376,7 +380,7 @@ impl<T: Clone> State<T> {
         let cherry    = self.cherry_mut(cherry_ref);
         let cut_count = cherry.cut_count(first_leaf);
         cherry.cut(first_leaf);
-        return cut_count;
+        cut_count
     }
 
     /// Restore the cut count of a leaf in a cherry
@@ -391,18 +395,23 @@ impl<T: Clone> State<T> {
 
     /// Prune a leaf from a tree
     pub fn prune_leaf(&mut self, leaf: Leaf, tree: usize) -> Option<Node> {
+
         self.leaf_mut(leaf).decrease_num_occurrences();
+
         if self.leaf(leaf).num_occurrences() == 0 {
             self.num_leaves -= 1;
         }
+
         self.tree_mut(tree).prune_leaf(leaf)
     }
 
     /// Restore a leaf that was previously pruned
     pub fn restore_leaf(&mut self, leaf: Leaf, tree: usize) {
+
         if self.leaf(leaf).num_occurrences() == 0 {
             self.num_leaves += 1;
         }
+
         self.leaf_mut(leaf).increase_num_occurrences();
         self.tree_mut(tree).restore_leaf(leaf);
     }
@@ -441,12 +450,14 @@ impl<T: Clone> State<T> {
 
         let labels = self.tree(0).labels();
 
-        self.tc_seq.into_iter().map(|pair| {
-            match pair {
-                Pair::Reduce(u, v) => Pair::Reduce(labels[u.id()].clone(), labels[v.id()].clone()),
-                Pair::Final(u)     => Pair::Final(labels[u.id()].clone()),
-            }
-        }).collect()
+        self.tc_seq.into_iter()
+            .map(|pair| {
+                match pair {
+                    Pair::Reduce(u, v) => Pair::Reduce(labels[u.id()].clone(), labels[v.id()].clone()),
+                    Pair::Final(u)     => Pair::Final(labels[u.id()].clone()),
+                }
+            })
+            .collect()
     }
 
     //----------------------------------------------------------------------------------------------
@@ -545,7 +556,9 @@ pub mod tests {
 
     /// Construct a forest to be used in subsequent tests
     pub fn build_forest() -> (Vec<Tree<String>>, Vec<String>) {
+
         let mut builder  = TreeBuilder::<String>::new();
+
         let tree1_newick = String::from("(((a,c),d),((b,f),((g,e),h)));");
         let tree2_newick = String::from("((a,(d,c)),(((e,g),(h,f)),b));");
         let tree3_newick = String::from("((((h,(f,((g,e),c))),b),a),d);");
@@ -556,6 +569,7 @@ pub mod tests {
         newick.push('\n');
         newick += &tree3_newick;
         newick.push('\n');
+
         newick::parse_forest(&mut builder, &newick).unwrap();
         (builder.trees(), vec![tree1_newick, tree2_newick, tree3_newick])
     }
@@ -633,12 +647,18 @@ pub mod tests {
     /// current max weight
     #[test]
     fn increase_query_max_weight() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
+
         assert_eq!(state.max_weight(), 0);
+
         state.increase_max_weight();
+
         assert_eq!(state.max_weight(), 1);
+
         state.increase_max_weight();
+
         assert_eq!(state.max_weight(), 2);
     }
 
@@ -646,20 +666,34 @@ pub mod tests {
     /// correct weight
     #[test]
     fn increase_decrease_query_weight() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
+
         assert_eq!(state.weight(), 0);
+
         state.increase_weight();
+
         assert_eq!(state.weight(), 1);
+
         state.increase_weight();
+
         assert_eq!(state.weight(), 2);
+
         state.decrease_weight();
+
         assert_eq!(state.weight(), 1);
+
         state.increase_weight();
+
         assert_eq!(state.weight(), 2);
+
         state.decrease_weight();
+
         assert_eq!(state.weight(), 1);
+
         state.decrease_weight();
+
         assert_eq!(state.weight(), 0);
     }
 
@@ -669,6 +703,7 @@ pub mod tests {
     fn record_and_forget_cherry() {
         // TODO: This does not currently test that cherries are classified correctly as trivial or
         // non-trivial once not all leaves occur in all trees.
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
@@ -719,6 +754,7 @@ pub mod tests {
         // Recording cherry (1, 2) once more should make it trivial now because it occurs in all
         // trees
         let (rec3, mov3) = state.record_cherry(Leaf::new(1), Leaf::new(2), 2);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -757,6 +793,7 @@ pub mod tests {
 
         // Forgetting cherry (1, 2) should get us back to the previous state
         state.forget_cherry(rec3, mov3);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -796,6 +833,7 @@ pub mod tests {
 
         // Forget (3, 7)
         state.forget_cherry(rec2, mov2);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -832,6 +870,7 @@ pub mod tests {
 
         // Forget (1, 2); we should be back to the original state now
         state.forget_cherry(rec1, mov1);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -872,8 +911,10 @@ pub mod tests {
     fn check_for_trivial_cherry() {
         // TODO: This does not test that check_for_trivial_cherries works when not every leaf
         // occurs the same number of times
+
         let (trees, _) = build_forest();
         let state = State::new(trees);
+
         assert_eq!(state.check_for_trivial_cherry(Leaf::new(0)), None);
         assert_eq!(state.check_for_trivial_cherry(Leaf::new(1)), None);
         assert_eq!(state.check_for_trivial_cherry(Leaf::new(2)), None);
@@ -887,8 +928,10 @@ pub mod tests {
     /// Check that check_for_cherry finds all cherries
     #[test]
     fn check_for_cherry() {
+
         let (trees, _) = build_forest();
         let state = State::new(trees);
+
         assert_eq!(state.check_for_cherry(Node::new(0), 0), Some((Leaf::new(0), Leaf::new(1))));
         assert_eq!(state.check_for_cherry(Node::new(1), 0), Some((Leaf::new(0), Leaf::new(1))));
         assert_eq!(state.check_for_cherry(Node::new(2), 0), None);
@@ -940,12 +983,14 @@ pub mod tests {
     /// correctly, including maintainance of references from leaf records into the cherry lists.
     #[test]
     pub fn push_pop_trivial_cherry() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
         // Push a trivial cherry (3, 5)
         let cherry_ref =
             state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::Trivial(1));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -974,6 +1019,7 @@ pub mod tests {
         // Push a trivial cherry (2, 7)
         let cherry_ref =
             state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::Trivial(2));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1004,6 +1050,7 @@ pub mod tests {
 
         // Pop the cherry (2, 7) again
         let cherry = &state.pop_trivial_cherry();
+
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(2), Leaf::new(7)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1033,6 +1080,7 @@ pub mod tests {
         // Push (1, 4)
         let cherry_ref =
             state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(1), Leaf::new(4), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::Trivial(2));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1066,6 +1114,7 @@ pub mod tests {
         // Push (2, 7)
         let cherry_ref =
             state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::Trivial(3));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1101,6 +1150,7 @@ pub mod tests {
 
         // Pop (2, 7)
         let cherry = &state.pop_trivial_cherry();
+
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(2), Leaf::new(7)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1134,6 +1184,7 @@ pub mod tests {
 
         // Pop (1, 4)
         let cherry = &state.pop_trivial_cherry();
+
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(1), Leaf::new(4)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1162,6 +1213,7 @@ pub mod tests {
 
         // Pop (3, 5)
         let cherry = &state.pop_trivial_cherry();
+
         assert_eq!(cherry.as_ref().unwrap().leaves(), (Leaf::new(3), Leaf::new(5)));
         assert_eq!(cherry.as_ref().unwrap().trees().collect::<Vec<&usize>>(), vec![&3]);
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1191,12 +1243,14 @@ pub mod tests {
     /// pop_non_trivial_cherry operation because it's not needed by the algorithm.
     #[test]
     pub fn push_non_trivial_cherry() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
         // Push (3, 5)
         let cherry_ref =
             state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(3), Leaf::new(5), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::NonTrivial(4));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1234,6 +1288,7 @@ pub mod tests {
         // Push (2, 7)
         let cherry_ref =
             state.push_non_trivial_cherry(cherry::Cherry::new(Leaf::new(2), Leaf::new(7), 3));
+
         assert_eq!(cherry_ref, cherry::Ref::NonTrivial(5));
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
@@ -1276,14 +1331,15 @@ pub mod tests {
     /// restore_non_trivial_cherry
     #[test]
     fn remove_restore_trivial_non_trivial_cherry() {
-        // TODO: Remove non-trivial cherry (last, not last), trivial cherry (only, last, not
-        // last)
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
         // Remove the last non-trivial cherry
-        let cherry = state.remove_cherry(cherry::Ref::NonTrivial(3));
+        let cherry_ref = cherry::Ref::NonTrivial(3);
+        let cherry     = state.remove_cherry(cherry_ref);
         let empty_vec: Vec<&cherry::Ref> = vec![];
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1315,7 +1371,8 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[2].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // ... and restore it.
-        state.restore_non_trivial_cherry(3, cherry);
+        state.restore_cherry(cherry_ref, cherry);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1351,7 +1408,9 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[3].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // Remove a non-trivial cherry from the middle
-        let cherry = state.remove_cherry(cherry::Ref::NonTrivial(1));
+        let cherry_ref = cherry::Ref::NonTrivial(1);
+        let cherry     = state.remove_cherry(cherry_ref);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1383,7 +1442,8 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[2].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // ... and restore it.
-        state.restore_non_trivial_cherry(1, cherry);
+        state.restore_cherry(cherry_ref, cherry);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1419,7 +1479,9 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[3].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // Remove the last trivial cherry
-        let cherry = state.remove_cherry(cherry::Ref::Trivial(0));
+        let cherry_ref = cherry::Ref::Trivial(0);
+        let cherry     = state.remove_cherry(cherry_ref);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1450,7 +1512,8 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[3].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // ... and restore it.
-        state.restore_trivial_cherry(0, cherry);
+        state.restore_cherry(cherry_ref, cherry);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1487,7 +1550,9 @@ pub mod tests {
 
         // Remove a trivial cherry from the middle
         state.push_trivial_cherry(cherry::Cherry::new(Leaf::new(1), Leaf::new(2), 0));
-        let cherry = state.remove_cherry(cherry::Ref::Trivial(0));
+        let cherry_ref = cherry::Ref::Trivial(0);
+        let cherry     = state.remove_cherry(cherry_ref);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1522,7 +1587,8 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[3].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // ... and restore it.
-        state.restore_trivial_cherry(0, cherry);
+        state.restore_cherry(cherry_ref, cherry);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1566,12 +1632,14 @@ pub mod tests {
     /// references from leaf records to cherries.
     #[test]
     fn remove_restore_cherry_ref() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
         // Get rid of leaf 1's 0th cherry (not the last cherry in the list, so the old last
         // cherry's cross pointers must be updated).
         state.remove_cherry_ref(Leaf::new(1), 0);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1609,6 +1677,7 @@ pub mod tests {
         // ... and bring it back (the old last cherry is back in the last place and again has the
         // correct cross pointers).
         state.restore_cherry_ref(Leaf::new(1), 0, cherry::Ref::NonTrivial(0));
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1645,6 +1714,7 @@ pub mod tests {
 
         // Remove the last cherry of leaf 4.
         state.remove_cherry_ref(Leaf::new(4), 1);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1681,6 +1751,7 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_cherry_ref(Leaf::new(4), 1, cherry::Ref::NonTrivial(2));
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1716,7 +1787,9 @@ pub mod tests {
         assert_eq!(state.non_trivial_cherries[3].trees().collect::<Vec<&usize>>(), vec![&1]);
 
         // Remove the only cherry of leaf 5.
+        let empty_vec: Vec<&cherry::Ref> = vec![];
         state.remove_cherry_ref(Leaf::new(5), 0);
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1727,7 +1800,6 @@ pub mod tests {
                    &cherry::Ref::NonTrivial(1)]);
         assert_eq!(state.leaves[4].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(1), &cherry::Ref::NonTrivial(2)]);
-        let empty_vec: Vec<&cherry::Ref> = vec![];
         assert_eq!(state.leaves[5].cherries().collect::<Vec<&cherry::Ref>>(), empty_vec);
         assert_eq!(state.leaves[6].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::Trivial(0)]);
@@ -1753,6 +1825,7 @@ pub mod tests {
 
         // ... and restore it.
         state.restore_cherry_ref(Leaf::new(5), 0, cherry::Ref::Trivial(0));
+
         assert_eq!(state.leaves[0].cherries().collect::<Vec<&cherry::Ref>>(), vec![
                    &cherry::Ref::NonTrivial(0)]);
         assert_eq!(state.leaves[1].cherries().collect::<Vec<&cherry::Ref>>(), vec![
@@ -1808,6 +1881,7 @@ pub mod tests {
 
         // Prune leaf 4; it now occurs only twice.
         state.prune_leaf(Leaf::new(4), 1);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(newicks[0].clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_pruned.clone()));
@@ -1823,6 +1897,7 @@ pub mod tests {
 
         // Prune it from tree 2; it now occurs only once.
         state.prune_leaf(Leaf::new(4), 2);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(newicks[0].clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_pruned.clone()));
@@ -1838,6 +1913,7 @@ pub mod tests {
 
         // Prune it from tree 0; it's now gone.
         state.prune_leaf(Leaf::new(4), 0);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_pruned.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_pruned.clone()));
@@ -1853,6 +1929,7 @@ pub mod tests {
 
         // Bring it back in tree 2.
         state.restore_leaf(Leaf::new(4), 2);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_pruned.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_pruned.clone()));
@@ -1868,6 +1945,7 @@ pub mod tests {
 
         // Bring it back in tree 0.
         state.restore_leaf(Leaf::new(4), 0);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_restored.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_pruned.clone()));
@@ -1883,6 +1961,7 @@ pub mod tests {
 
         // Bring it back in tree 1.
         state.restore_leaf(Leaf::new(4), 1);
+
         assert_eq!(state.num_trees(), 3);
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_restored.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick_restored.clone()));
@@ -1896,6 +1975,7 @@ pub mod tests {
     /// Check that suppress_node and restore_node behave correctly
     #[test]
     fn suppress_restore_node() {
+
         let (trees, newicks) = build_forest();
         let mut state = State::new(trees);
 
@@ -1916,12 +1996,14 @@ pub mod tests {
 
         // Check that suppressing the parent of a leaf works correctly
         state.suppress_node(parent0, 0);
+
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_suppressed.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick.clone()));
         assert_eq!(newick::format_tree(&state.trees[2]), Some(tree3_newick_pruned.clone()));
     
         // Check that suppressing the parent of an internal node works correctly
         state.suppress_node(parent2, 2);
+
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_suppressed.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick.clone()));
         assert_eq!(newick::format_tree(&state.trees[2]), Some(tree3_newick_suppressed.clone()));
@@ -1929,6 +2011,7 @@ pub mod tests {
         // Restore them both
         state.restore_node(parent0, 0);
         state.restore_node(parent2, 2);
+
         assert_eq!(newick::format_tree(&state.trees[0]), Some(tree1_newick_pruned.clone()));
         assert_eq!(newick::format_tree(&state.trees[1]), Some(tree2_newick.clone()));
         assert_eq!(newick::format_tree(&state.trees[2]), Some(tree3_newick_pruned.clone()));
@@ -1937,20 +2020,30 @@ pub mod tests {
     /// Test the correct behaviour of push/pop operations to manipulate the tree-child sequence.
     #[test]
     fn push_pop_tree_child_pair() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
+
         assert_eq!(state.tc_seq.len(), 0);
+
         state.push_tree_child_pair(Leaf::new(3), Leaf::new(4));
+
         assert_eq!(state.tc_seq, vec![Pair::Reduce(Leaf::new(3), Leaf::new(4))]);
+
         state.push_tree_child_pair(Leaf::new(3), Leaf::new(5));
+
         assert_eq!(state.tc_seq, vec![
                    Pair::Reduce(Leaf::new(3), Leaf::new(4)),
                    Pair::Reduce(Leaf::new(3), Leaf::new(5))]);
+
         state.pop_tree_child_pair();
+
         assert_eq!(state.tc_seq, vec![Pair::Reduce(Leaf::new(3), Leaf::new(4))]);
+
         state.push_tree_child_pair(Leaf::new(6), Leaf::new(5));
         state.push_tree_child_pair(Leaf::new(6), Leaf::new(7));
         state.push_final_tree_child_pair(Leaf::new(0));
+
         assert_eq!(state.tc_seq(), vec![
                    Pair::Reduce(String::from("b"), String::from("f")),
                    Pair::Reduce(String::from("e"), String::from("g")),
@@ -1962,6 +2055,7 @@ pub mod tests {
     /// Some(leaf) if leaf is the final remaining leaf).
     #[test]
     fn final_leaf() {
+
         let (trees, _) = build_forest();
         let mut state = State::new(trees);
 
@@ -1982,6 +2076,7 @@ pub mod tests {
 
         // ... even if it occurs more than once
         state.leaf_mut(Leaf::new(4)).increase_num_occurrences();
+
         assert_eq!(state.final_leaf(), Some(Leaf::new(4)));
     }
 

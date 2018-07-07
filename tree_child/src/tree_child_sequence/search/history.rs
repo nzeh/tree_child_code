@@ -62,11 +62,8 @@ pub enum Op {
     /// Remove a cherry from the end of the list of trivial cherries
     PopTrivialCherry(cherry::Cherry),
 
-    /// Remove a cherry from the given position in the list of trivial cherries
-    RemoveTrivialCherry(usize, cherry::Cherry),
-
-    /// Remove a cherry from the given position in the list of non-trivial cherries
-    RemoveNonTrivialCherry(usize, cherry::Cherry),
+    /// Remove a cherry from the given position in the list of trivial or non-trivial cherries
+    RemoveCherry(cherry::Ref, cherry::Cherry),
 
     /// Record a new cherry and remember which cherry took its place if it was moved from the
     /// non-trivial cherry list to the trivial cherry list

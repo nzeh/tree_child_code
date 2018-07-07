@@ -32,18 +32,6 @@ pub struct Cherry {
 
 }
 
-/// Reference to a cherry
-#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
-#[derive(Clone, Copy)]
-pub enum Ref {
-
-    /// Reference to a cherry in the list of trivial cherries
-    Trivial(usize),
-
-    /// Reference to a cherry in the list of non-trivial cherries
-    NonTrivial(usize),
-}
-
 impl Cherry {
 
     /// Create a new cherry first found in `tree`
@@ -128,4 +116,16 @@ impl Cherry {
             self.v_trees_cut
         }
     }
+}
+
+/// Reference to a cherry
+#[cfg_attr(test, derive(Debug, Eq))]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub enum Ref {
+
+    /// Reference to a cherry in the list of trivial cherries
+    Trivial(usize),
+
+    /// Reference to a cherry in the list of non-trivial cherries
+    NonTrivial(usize),
 }
