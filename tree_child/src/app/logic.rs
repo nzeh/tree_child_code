@@ -5,18 +5,39 @@
 use app;
 use clusters;
 use tree::Tree;
+use network::TcNet;
 use tree_child_sequence as tc;
+use tree_child_sequence::TcSeq;
 
-/// Compute a tree-child sequence
-pub fn tree_child_sequence(cfg: &app::Config, trees: Vec<Tree<String>>) -> tc::TcSeq<String> {
-    if cfg.use_clustering {
+/// The result of the tree-child sequence/network computation
+pub enum TcResult {
+
+    /// The result is a network
+    Net(TcNet<String>),
+
+    /// The result is a sequence
+    Seq(TcSeq<String>),
+
+}
+
+/// Compute a tree-child sequence or network
+pub fn tree_child_sequence_or_network(
+    cfg: &app::Config, trees: Vec<Tree<String>>) -> TcResult {
+
+    let tc_seq = if cfg.use_clustering {
         clusters::combine_tc_seqs(
             clusters::partition(trees)
-                .into_iter()
-                .map(|trees| tc_seq(cfg, trees))
-                .collect())
+            .into_iter()
+            .map(|trees| tc_seq(cfg, trees))
+            .collect())
     } else {
         tc_seq(cfg, trees)
+    };
+
+    if cfg.compute_network {
+        TcResult::Net(TcNet::from_seq(tc_seq))
+    } else {
+        TcResult::Seq(tc_seq)
     }
 }
 

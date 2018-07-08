@@ -8,5 +8,5 @@ mod result;
 
 pub use self::config::Config;
 pub use self::io::{read_input, write_output};
-pub use self::logic::tree_child_sequence;
+pub use self::logic::{TcResult, tree_child_sequence_or_network};
 pub use self::result::{Result, Error};

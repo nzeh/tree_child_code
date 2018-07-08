@@ -186,7 +186,7 @@ impl<T: Clone> Search<T> {
 
                 // Record the tree-child pair and cut u in all trees that have the cherry (u, v)
                 self.increase_weight();
-                self.push_tree_child_pair(u, v);
+                self.push_non_trivial_tree_child_pair(u, v);
                 for tree in cherry.trees() {
                     self.prune_leaf(u, *tree);
                 }
@@ -287,7 +287,7 @@ impl<T: Clone> Search<T> {
             };
 
             // Add (u, v) as a cherry to the cherry picking sequence
-            self.push_tree_child_pair(u, v);
+            self.push_trivial_tree_child_pair(u, v);
 
             // Prune u from every tree that has the cherry (u, v)
             for tree in cherry.trees() {
@@ -437,10 +437,16 @@ impl<T: Clone> Search<T> {
         self.state.increase_max_weight();
     }
 
-    /// Add a cherry to the cherry picking sequence
-    fn push_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
+    /// Add a trivial cherry to the cherry picking sequence
+    fn push_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.history.record_op(Op::PushTreeChildPair);
-        self.state.push_tree_child_pair(u, v);
+        self.state.push_trivial_tree_child_pair(u, v);
+    }
+
+    /// Add a non-trivial cherry to the cherry picking sequence
+    fn push_non_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
+        self.history.record_op(Op::PushTreeChildPair);
+        self.state.push_non_trivial_tree_child_pair(u, v);
     }
 
     /// Undo the recording of a cherry
@@ -537,29 +543,29 @@ mod tests {
         let u3 = Leaf::new(1);
         let v3 = Leaf::new(6);
 
-        search.push_tree_child_pair(u1, v1);
+        search.push_non_trivial_tree_child_pair(u1, v1);
 
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
-        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
+        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::NonTrivial(u1, v1)]);
 
         let snapshot1 = search.history.take_snapshot();
 
-        search.push_tree_child_pair(u2, v2);
-        search.push_tree_child_pair(u3, v3);
+        search.push_trivial_tree_child_pair(u2, v2);
+        search.push_non_trivial_tree_child_pair(u3, v3);
 
         assert_eq!(history::tests::ops(&search.history), &vec![
                    history::Op::PushTreeChildPair, history::Op::PushTreeChildPair,
                    history::Op::PushTreeChildPair]);
         assert_eq!(state::tests::tc_seq(&search.state), &vec![
-                   Pair::Reduce(u1, v1),
-                   Pair::Reduce(u2, v2),
-                   Pair::Reduce(u3, v3)
+                   Pair::NonTrivial(u1, v1),
+                   Pair::Trivial(u2, v2),
+                   Pair::NonTrivial(u3, v3)
         ]);
 
         search.rewind_to_snapshot(snapshot1);
 
         assert_eq!(history::tests::ops(&search.history), &vec![history::Op::PushTreeChildPair]);
-        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::Reduce(u1, v1)]);
+        assert_eq!(state::tests::tc_seq(&search.state), &vec![Pair::NonTrivial(u1, v1)]);
 
         search.rewind_to_snapshot(snapshot0);
 

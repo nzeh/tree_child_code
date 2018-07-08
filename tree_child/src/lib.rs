@@ -6,6 +6,7 @@ extern crate num_cpus;
 
 pub mod app;
 pub mod clusters;
+pub mod network;
 pub mod newick;
 pub mod tree;
 pub mod tree_child_sequence;
