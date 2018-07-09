@@ -37,10 +37,12 @@
 //! or forest.  In the case of `format_forest()`, each tree is placed on its own line in the output
 //! string.
 
+use network::TcNet;
 use tree::{Node, Tree, TreeBuilder};
 use std::error;
 use std::fmt;
 use std::fmt::{Display, Write};
+use std::hash::Hash;
 use std::iter;
 use std::result;
 use std::str;
@@ -299,9 +301,9 @@ impl<'b, 'i> Parser<'b, 'i> {
 /// assert_eq!(newick, format_tree(tree).unwrap());
 /// ```
 pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
-    let mut newick = String::new();
-    format_one_tree(tree, &mut newick)?;
-    Some(newick)
+    let leaf_annotator = |_, string| string;
+    let node_annotator = |_| "".to_string();
+    Formatter::new(tree, leaf_annotator, node_annotator).run()
 }
 
 /// Format a forest into a Newick string, one line per tree.
@@ -319,40 +321,98 @@ pub fn format_tree<T: Clone + Display>(tree: &Tree<T>) -> Option<String> {
 /// ```
 pub fn format_forest<T: Clone + Display>(forest: &[Tree<T>]) -> Option<String> {
     let mut newick = String::new();
+    let leaf_annotator = |_, string| string;
+    let node_annotator = |_| "".to_string();
     for tree in forest {
-        format_one_tree(tree, &mut newick)?;
-        newick.write_char('\n').unwrap();
+        let tree = Formatter::new(tree, leaf_annotator, node_annotator).run()?;
+        write!(newick, "{}\n", tree).unwrap();
     }
     Some(newick)
 }
 
-/// Format a tree into a Newick string, held in a given string buffer
-fn format_one_tree<T: Clone + Display>(tree: &Tree<T>, newick: &mut String) -> Option<()> {
-
-    fn visit_node<T: Clone + Display>(
-        tree: &Tree<T>, newick: &mut String, node: Node) -> Option<()> {
-
-        if tree.is_leaf(node) {
-            write!(newick, "{}", &tree.label(node)?).unwrap();
+/// Format a network into an extended Newick string
+pub fn format_network<T>(network: &TcNet<T>) -> Option<String>
+where T: Clone + Default + Display + Eq + Hash
+{
+    let leaf_annotator = |node, string| {
+        if let Some(ret) = network.reticulations().get(&node) {
+            format!("#H{}", ret)
         } else {
-            newick.write_char('(').unwrap();
-            let mut children = tree.children(node);
-            visit_node(tree, newick, children.next()?);
-            for child in children {
-                newick.write_char(',').unwrap();
-                visit_node(tree, newick, child);
-            }
-            newick.write_char(')').unwrap();
+            string
         }
-        Some(())
     };
 
-    if let Some(root) = tree.root() {
-        visit_node(tree, newick, root)?;
-        newick.write_str(";").unwrap();
+    let node_annotator = |node| {
+        if let Some(ret) = network.reticulations().get(&node) {
+            format!("#H{}", ret)
+        } else {
+            "".to_string()
+        }
+    };
+
+    Formatter::new(network.tree(), leaf_annotator, node_annotator).run()
+}
+
+/// The state of the formatting process
+struct Formatter<'a, T: 'a, LeafAnnotator, NodeAnnotator> {
+
+    /// The tree being annotated
+    tree: &'a Tree<T>,
+
+    /// The current string
+    newick: String,
+    
+    /// An annotator for leaves
+    leaf_annotator: LeafAnnotator,
+
+    /// An annotator for internal nodes
+    node_annotator: NodeAnnotator,
+}
+
+impl<'a, T, LeafAnnotator, NodeAnnotator> Formatter<'a, T, LeafAnnotator, NodeAnnotator>
+where T:             'a + Clone + Display,
+      LeafAnnotator: Fn(Node, String) -> String,
+      NodeAnnotator: Fn(Node) -> String
+{
+    /// Create a new formatter using the given pair of annotators
+    fn new(tree: &'a Tree<T>, leaf_annotator: LeafAnnotator, node_annotator: NodeAnnotator) -> Self {
+        Self {
+            tree,
+            newick: String::new(),
+            leaf_annotator,
+            node_annotator,
+        }
+    }
+
+    /// Format a tree into a Newick string, held in a given string buffer
+    fn run(mut self) -> Option<String> {
+
+        if let Some(root) = self.tree.root() {
+            self.visit_node(root)?;
+            self.newick.write_str(";").unwrap();
+            Some(self.newick)
+        } else {
+            None
+        }
+    }
+
+    /// Visit the given node
+    fn visit_node(&mut self, node: Node) -> Option<()> {
+        if self.tree.is_leaf(node) {
+            write!(self.newick, "{}",
+                   (self.leaf_annotator)(node, format!("{}", self.tree.label(node)?))).unwrap();
+        } else {
+            self.newick.write_char('(').unwrap();
+            let mut children = self.tree.children(node);
+            self.visit_node(children.next()?);
+            for child in children {
+                self.newick.write_char(',').unwrap();
+                self.visit_node(child);
+            }
+            self.newick.write_char(')').unwrap();
+            write!(self.newick, "{}", (self.node_annotator)(node)).unwrap();
+        }
         Some(())
-    } else {
-        None
     }
 }
 

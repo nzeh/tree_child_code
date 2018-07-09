@@ -50,6 +50,5 @@ fn format_tc_seq(tc_seq: TcSeq<String>) -> String {
 
 /// Format a tree-child network
 fn format_tc_net(tc_net: TcNet<String>) -> String {
-    // TODO
-    "".to_string()
+    format!("{}\n", newick::format_network(&tc_net).unwrap())
 }
