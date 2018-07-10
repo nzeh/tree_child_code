@@ -12,12 +12,17 @@ fn clusters() {
     let newick      = "((a,((b,c),d)),e);\n((a,(b,(c,d))),e);\n(a,((b,(c,d)),e));\n";
     newick::parse_forest(&mut builder, newick).unwrap();
     let trees       = builder.trees();
-    let seq         = tree_child_sequence::tree_child_sequence(trees.clone(), 32, Some(1), false, false);
+    let seq         = tree_child_sequence::tree_child_sequence(
+        trees.clone(), 32, Some(1), false, false);
 
     let clusters     = clusters::partition(trees);
+
     assert_eq!(clusters.len(), 2);
+
     let cluster_seqs = clusters.into_iter().map(
-        |cluster| tree_child_sequence::tree_child_sequence(cluster, 32, Some(1), false, false)).collect();
+        |cluster| tree_child_sequence::tree_child_sequence(
+            cluster, 32, Some(1), false, false)).collect();
     let cseq         = clusters::combine_tc_seqs(cluster_seqs);
+
     assert_eq!(seq, cseq);
 }
