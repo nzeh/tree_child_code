@@ -347,7 +347,7 @@ enum TypedNodeData<T> {
 }
 
 /// The type used to represent tree nodes
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Node(usize);
 
 impl Node {

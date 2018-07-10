@@ -430,9 +430,14 @@ impl<T: Clone> State<T> {
     // Primitives to manipulate the tree-chlid sequence
     //----------------------------------------------------------------------------------------------
 
-    /// Push a new pair to the end of the tree-child sequence
-    pub fn push_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
-        self.tc_seq.push(Pair::Reduce(u, v));
+    /// Push a trivial pair to the end of the tree-child sequence
+    pub fn push_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
+        self.tc_seq.push(Pair::Trivial(u, v));
+    }
+
+    /// Push a non-trivial pair to the end of the tree-child sequence
+    pub fn push_non_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
+        self.tc_seq.push(Pair::NonTrivial(u, v));
     }
 
     /// Push the final pair in the tree-child sequence
@@ -453,8 +458,15 @@ impl<T: Clone> State<T> {
         self.tc_seq.into_iter()
             .map(|pair| {
                 match pair {
-                    Pair::Reduce(u, v) => Pair::Reduce(labels[u.id()].clone(), labels[v.id()].clone()),
-                    Pair::Final(u)     => Pair::Final(labels[u.id()].clone()),
+
+                    Pair::Trivial(u, v) =>
+                        Pair::Trivial(labels[u.id()].clone(), labels[v.id()].clone()),
+
+                    Pair::NonTrivial(u, v) =>
+                        Pair::NonTrivial(labels[u.id()].clone(), labels[v.id()].clone()),
+
+                    Pair::Final(u) =>
+                        Pair::Final(labels[u.id()].clone()),
                 }
             })
             .collect()
@@ -2026,28 +2038,28 @@ pub mod tests {
 
         assert_eq!(state.tc_seq.len(), 0);
 
-        state.push_tree_child_pair(Leaf::new(3), Leaf::new(4));
+        state.push_trivial_tree_child_pair(Leaf::new(3), Leaf::new(4));
 
-        assert_eq!(state.tc_seq, vec![Pair::Reduce(Leaf::new(3), Leaf::new(4))]);
+        assert_eq!(state.tc_seq, vec![Pair::Trivial(Leaf::new(3), Leaf::new(4))]);
 
-        state.push_tree_child_pair(Leaf::new(3), Leaf::new(5));
+        state.push_non_trivial_tree_child_pair(Leaf::new(3), Leaf::new(5));
 
         assert_eq!(state.tc_seq, vec![
-                   Pair::Reduce(Leaf::new(3), Leaf::new(4)),
-                   Pair::Reduce(Leaf::new(3), Leaf::new(5))]);
+                   Pair::Trivial(Leaf::new(3), Leaf::new(4)),
+                   Pair::NonTrivial(Leaf::new(3), Leaf::new(5))]);
 
         state.pop_tree_child_pair();
 
-        assert_eq!(state.tc_seq, vec![Pair::Reduce(Leaf::new(3), Leaf::new(4))]);
+        assert_eq!(state.tc_seq, vec![Pair::Trivial(Leaf::new(3), Leaf::new(4))]);
 
-        state.push_tree_child_pair(Leaf::new(6), Leaf::new(5));
-        state.push_tree_child_pair(Leaf::new(6), Leaf::new(7));
+        state.push_trivial_tree_child_pair(Leaf::new(6), Leaf::new(5));
+        state.push_non_trivial_tree_child_pair(Leaf::new(6), Leaf::new(7));
         state.push_final_tree_child_pair(Leaf::new(0));
 
         assert_eq!(state.tc_seq(), vec![
-                   Pair::Reduce(String::from("b"), String::from("f")),
-                   Pair::Reduce(String::from("e"), String::from("g")),
-                   Pair::Reduce(String::from("e"), String::from("h")),
+                   Pair::Trivial(String::from("b"), String::from("f")),
+                   Pair::Trivial(String::from("e"), String::from("g")),
+                   Pair::NonTrivial(String::from("e"), String::from("h")),
                    Pair::Final(String::from("a"))]);
     }
 
@@ -2109,5 +2121,4 @@ pub mod tests {
     pub fn non_trivial_cherry<T>(state: &State<T>, index: usize) -> &cherry::Cherry {
         &state.non_trivial_cherries[index]
     }
-
 }

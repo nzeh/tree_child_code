@@ -27,6 +27,9 @@ pub struct Config {
 
     /// The number of branches each thread should explore between polls for idle threads
     pub poll_delay: Option<usize>,
+
+    /// Compute a tree-child network instead of a tree-child sequence as output
+    pub compute_network: bool,
 }
 
 impl Config {
@@ -98,7 +101,22 @@ If this option is absent, this is equivalent to \"-p 1\" (single-threaded execut
 "Number of branches to explore between checks for idle threads to share work with; \
 \"infinite\" = disable checks. If this option is absent, this is equivalent to \
 \"-w infinite\" if the number of threads is one and to \"-w 1\" if the number \
-of threads is greater than one.")
+of threads is greater than one."),
+            Arg::with_name("compute_sequence")
+                .short("s")
+                .long("--compute-sequence")
+                .required(false)
+                .takes_value(false)
+                .help("output a tree-child sequence")
+                .long_help("output a tree-child sequence"),
+            Arg::with_name("compute_network")
+                .conflicts_with("compute_sequence")
+                .short("n")
+                .long("--compute-network")
+                .required(false)
+                .takes_value(false)
+                .help("output a tree-child network")
+                .long_help("output a tree-child network in extended Newick format"),
         ];
 
         // Parse the arguments
@@ -117,10 +135,11 @@ of threads is greater than one.")
         let limit_fanout             = !args.is_present("dont_limit_fanout");
         let num_threads              = num_threads(args.value_of("num_threads"));
         let poll_delay               = poll_delay(args.value_of("poll_delay"), num_threads);
+        let compute_network          = !args.is_present("compute_sequence");
 
         Self {
             input, output, use_clustering, use_redundant_branch_opt, limit_fanout,
-            num_threads, poll_delay,
+            num_threads, poll_delay, compute_network,
         }
     }
 }

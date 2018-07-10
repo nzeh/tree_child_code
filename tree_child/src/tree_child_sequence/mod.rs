@@ -12,8 +12,11 @@ mod search;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Pair<T> {
 
-    /// A pair (x, y) that eliminates x from every tree that has (x, y) as a cherry
-    Reduce(T, T),
+    /// A pair (x, y) that represents a trivial cherry
+    Trivial(T, T),
+
+    /// A pair (x, y) that eliminates a non-trivial cherry
+    NonTrivial(T, T),
 
     /// The final leaf left in every tree at the end of the sequence
     Final(T),
@@ -39,8 +42,9 @@ impl<T: fmt::Display> fmt::Display for Pair<T> {
 
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Pair::Reduce(u, v) => write!(f, "({}, {})", u, v),
-            Pair::Final(u)     => write!(f, "({}, -)", u),
+            Pair::Trivial(u, v)    => write!(f, "({}, {})", u, v),
+            Pair::NonTrivial(u, v) => write!(f, "({}, {})", u, v),
+            Pair::Final(u)         => write!(f, "({}, -)", u),
         }
     }
 }

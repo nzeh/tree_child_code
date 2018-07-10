@@ -12,8 +12,8 @@ fn main() {
 
 /// The real main function
 fn real_main() -> app::Result<()> {
-    let cfg    = app::Config::new();
-    let trees  = app::read_input(&cfg.input)?;
-    let tc_seq = app::tree_child_sequence(&cfg, trees);
-    app::write_output(cfg.output.as_ref().map(|s| &s[..]), tc_seq)
+    let cfg        = app::Config::new();
+    let trees      = app::read_input(&cfg.input)?;
+    let tc_net_seq = app::tree_child_sequence_or_network(&cfg, trees);
+    app::write_output(cfg.output.as_ref().map(|s| &s[..]), tc_net_seq)
 }
