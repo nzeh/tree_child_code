@@ -60,16 +60,15 @@ impl<T> Sender<T> {
     }
 
     /// Send an item to the receiver.  This method does not block.  The send succeeds if the
-    /// channel is empty and the thread is currently idle or empty as indicated by the provided
-    /// busy-flag.  In this case, the return values is `Status::Success`.  If the send fails
-    /// because the channel is full, the return value is `Status::FailFull`.  If the send fails
-    /// because the thread is in the wrong state (idle if busy is expected or vice versa), the
-    /// return value is `Status::FailState`.
-    pub fn send_if<Producer>(&self, item: Producer, busy: bool) -> Status
+    /// channel is empty and the thread is in the given state.  In this case, the return values is
+    /// `Status::Success`.  If the send fails because the channel is full, the return value is
+    /// `Status::FailFull`.  If the send fails because the thread is in the wrong state (idle if
+    /// busy is expected or vice versa), the return value is `Status::FailState`.
+    pub fn send_if<Producer>(&self, state: State, item: Producer) -> Status
         where Producer: FnOnce() -> T
     {
         let channel = self.channel.lock();
-        if *channel.busy != busy {
+        if *channel.busy != (state == State::Busy) {
             Status::FailState
         } else if channel.content.is_some() {
             Status::FailFull
@@ -82,17 +81,28 @@ impl<T> Sender<T> {
     /// Send an item to the receiver.  This method behaves exactly like `send_if` except that it
     /// ignores a full buffer and simply overwrites the buffer contents.  Thus, its only possible
     /// return values are `Status::Success` and `Status::FailState`.
-    pub fn _send_overwrite_if<Producer>(&self, item: Producer, busy: bool) -> Status
+    pub fn _send_overwrite_if<Producer>(&self, state: State, item: Producer) -> Status
         where Producer: FnOnce() -> T
     {
         let channel = self.channel.lock();
-        if *channel.busy == busy {
+        if *channel.busy == (state == State::Busy) {
             *channel.content = Some(item());
             Status::Success
         } else {
             Status::FailState
         }
     }
+}
+
+/// The state flag used by the send_if methods
+#[derive(PartialEq)]
+pub enum State {
+
+    /// The recipient is busy
+    Busy,
+
+    /// The recipient is idle
+    Idle,
 }
 
 /// The receiving end of the channel
@@ -177,8 +187,8 @@ impl<'a, T> Drop for LockedChannel<'a, T> {
 }
 
 /// The status type returned by the various send functions
-//#[cfg_attr(test, derive(Debug))]
-#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq)]
 pub enum Status {
 
     /// The send succeeded
@@ -220,12 +230,12 @@ mod tests {
     #[test]
     fn send_if() {
         let (sender, receiver) = super::channel();
-        assert_eq!(sender.send_if(|| 1, true), super::Status::FailState);
+        assert_eq!(sender.send_if(super::State::Busy, || 1), super::Status::FailState);
         receiver.set_state(true);
-        assert_eq!(sender.send_if(|| 1, true), super::Status::Success);
-        assert_eq!(sender.send_if(|| 2, true), super::Status::FailFull);
+        assert_eq!(sender.send_if(super::State::Busy, || 1), super::Status::Success);
+        assert_eq!(sender.send_if(super::State::Busy, || 2), super::Status::FailFull);
         assert_eq!(receiver.recv(), 1);
-        assert_eq!(sender.send_if(|| 3, true), super::Status::Success);
+        assert_eq!(sender.send_if(super::State::Busy, || 3), super::Status::Success);
         assert_eq!(receiver.recv(), 3);
     }
 
@@ -256,12 +266,12 @@ mod tests {
     fn send_overwrite_if() {
         let (sender, receiver) = super::channel();
         receiver.set_state(true);
-        assert_eq!(sender._send_overwrite_if(|| 1, false), super::Status::FailState);
+        assert_eq!(sender._send_overwrite_if(super::State::Idle, || 1), super::Status::FailState);
         receiver.set_state(false);
-        assert_eq!(sender._send_overwrite_if(|| 1, false), super::Status::Success);
+        assert_eq!(sender._send_overwrite_if(super::State::Idle, || 1), super::Status::Success);
         assert_eq!(receiver.recv(), 1);
-        assert_eq!(sender._send_overwrite_if(|| 1, false), super::Status::Success);
-        assert_eq!(sender._send_overwrite_if(|| 2, false), super::Status::Success);
+        assert_eq!(sender._send_overwrite_if(super::State::Idle, || 1), super::Status::Success);
+        assert_eq!(sender._send_overwrite_if(super::State::Idle, || 2), super::Status::Success);
         assert_eq!(receiver.recv(), 2);
     }
 

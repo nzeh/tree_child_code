@@ -15,7 +15,7 @@ use std::clone::Clone;
 use std::thread;
 use std::thread::{JoinHandle, yield_now};
 use super::TcSeq;
-use super::channel::{Receiver, Sender, Status};
+use super::channel::{Receiver, Sender, State, Status};
 use super::search::Search;
 
 /// The structure representing a worker
@@ -147,7 +147,7 @@ impl<T: Clone + Send + 'static> Worker<T> {
             // process, exit.
             keep_trying = false;
             for worker in self.workers.iter() {
-                match worker.send_if(|| Message::GetWork(self.id), true) {
+                match worker.send_if(State::Busy, || Message::GetWork(self.id)) {
                     Status::FailState => {},
                     Status::FailFull  => keep_trying = true,
                     Status::Success   => match self.incoming.recv() {
@@ -196,7 +196,7 @@ impl<T: Clone + Send + 'static> Worker<T> {
                 };
                 Message::SendWork(search_copy)
             };
-            self.workers[worker].send_if(package_search, false) == Status::Success
+            self.workers[worker].send_if(State::Idle, package_search) == Status::Success
         };
 
         if success {
