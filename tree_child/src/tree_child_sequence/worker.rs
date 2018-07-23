@@ -11,198 +11,229 @@
 //! succeeds, the worker sends a `Result(Some(seq))` message to the master to trigger termination
 //! of the search.
 
-use std::sync::{Arc, RwLock};
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::clone::Clone;
 use std::thread;
+use std::thread::{JoinHandle, yield_now};
 use super::TcSeq;
+use super::channel::{Receiver, Sender, State, Status};
 use super::search::Search;
 
-/// The external interface of a worker used by the master
+/// The structure representing a worker
 pub struct Worker<T> {
-
-    /// The worker's thread
-    thread: thread::JoinHandle<()>,
-
-    /// The worker's sending end of the message queue
-    queue: Sender<Option<Search<T>>>,
-}
-
-/// The internal state of a worker
-struct WorkerState<T> {
 
     /// The ID of this worker
     id: usize,
 
-    /// The total number of workers
-    num_workers: usize,
+    /// The communication interface to the master
+    master: Sender<Option<TcSeq<T>>>,
+
+    /// The communication interfaces to other workers
+    workers: Vec<Sender<Message<T>>>,
+    
+    /// The incoming message queue
+    incoming: Receiver<Message<T>>,
 
     /// The number of branches to explore before checking for idle threads
     poll_delay: Option<usize>,
-
-    /// The idle queue
-    waiting: Arc<RwLock<Vec<usize>>>,
-
-    /// The queue used to receive work from the master
-    work: Receiver<Option<Search<T>>>,
-
-    /// The queue used to send results back to the master
-    result: Sender<FromWorker<T>>,
-}
-
-/// The type of message a worker sends to the master
-pub enum FromWorker<T> {
-
-    /// The result of a computation
-    Result(Option<TcSeq<T>>),
-
-    /// Part of the work this worker is ready to share with another worker
-    WorkPackage(usize, Search<T>),
 }
 
 impl<T: Clone + Send + 'static> Worker<T> {
 
     /// Create a new worker
-    pub fn new(
-        id:          usize,
-        num_workers: usize,
-        poll_delay:  Option<usize>,
-        waiting:     Arc<RwLock<Vec<usize>>>,
-        result:      Sender<FromWorker<T>>) -> Self {
+    pub fn spawn(
+        id:         usize,
+        master:     Sender<Option<TcSeq<T>>>,
+        workers:    Vec<Sender<Message<T>>>,
+        incoming:   Receiver<Message<T>>,
+        poll_delay: Option<usize>) -> JoinHandle<()> {
 
-        let (queue, work) = channel();
-        let worker_state  = WorkerState { id, num_workers, poll_delay, waiting, work, result };
-        let thread        = thread::spawn(move || worker_state.run());
-
-        Worker { thread, queue }
+        let worker = Worker { id, master, workers, incoming, poll_delay };
+        thread::spawn(move || worker.run())
     }
-
-    /// Send work to this thread
-    pub fn work_on(&self, search: Search<T>) {
-        self.queue.send(Some(search)).unwrap();
-    }
-
-    /// Quit the thread
-    pub fn quit(self) {
-        self.queue.send(None).unwrap();
-        self.thread.join().unwrap();
-    }
-}
-
-impl<T: Clone> WorkerState<T> {
 
     /// Recursively search for a tree-child sequence
     fn run(self) {
-
-        // Go into idle state until we receive the first work package
-        self.send_result(None);
-
-        loop {
-
-            match self.work.recv().unwrap() {
-
-                // Exit on receiving an empty message
-                None => return,
-
-                // Start a search we receive from the master
-                Some(search) => {
-                    let result = self.run_search(search);
-                    self.send_result(result);
-                }
-            }
-        }
+        while self.run_search() {}
     }
 
-    /// Run a search and return the result
-    fn run_search(&self, mut search: Search<T>) -> Option<TcSeq<T>> {
+    /// Run a search and send the result back to the master
+    fn run_search(&self) -> bool {
 
-        // Terminate the search immediately if it has no chance of success (too many non-trivial
-        // cherries)
-        if search.can_succeed() {
+        if let Some(mut search) = self.get_work() {
 
-            // Create a new branch point for the current state
-            search.start_branch();
+            // Terminate the search immediately if it has no chance of success (too many non-trivial
+            // cherries)
+            let (keep_alive, seq) = if search.can_succeed() {
 
-            if let Some(poll_delay) = self.poll_delay {
-                self.run_search_cooperatively(&mut search, poll_delay);
+                // Create a new branch point for the current state
+                search.start_branch();
+
+                let keep_alive = match self.poll_delay {
+                    Some(poll_delay) => self.run_search_cooperatively(&mut search, poll_delay),
+                    None             => self.run_search_alone(&mut search),
+                };
+
+                // Return the tree-child sequence if we found one
+                (keep_alive, search.tc_seq())
+
             } else {
-                self.run_search_alone(&mut search);
+
+                (true, None)
+            };
+
+            if let Some(seq) = seq {
+                self.send_result(seq);
+                false
+            } else {
+                keep_alive
             }
-
-            // Return the tree-child sequence if we found one
-            search.tc_seq()
-
         } else {
 
-            None
+            false
         }
-
     }
 
     /// Run the search without interacting with other workers
-    fn run_search_alone(&self, search: &mut Search<T>) {
+    fn run_search_alone(&self, search: &mut Search<T>) -> bool {
         while search.branch() {}
+        true
     }
 
     /// Run the search in cooperation with other threads
-    fn run_search_cooperatively(&self, search: &mut Search<T>, poll_delay: usize) {
+    fn run_search_cooperatively(&self, search: &mut Search<T>, poll_delay: usize) -> bool {
 
-        'l: loop {
+        loop {
 
             // Run as many branching steps as indicated by poll_delay
             for _ in 0..poll_delay {
                 if !search.branch() {
-                    break 'l
+                    return true;
                 }
             }
 
-            // Now check whether there's an idle thread.
-            if self.waiting.read().unwrap().len() > 0 {
-
-                // Try to pop a waiting thread of the waiting queue.  This may fail if some
-                // other thread grabbed it first.
-                let recipient = self.waiting.write().unwrap().pop();
-
-                // If we did grab an idle thread, then ...
-                if let Some(recipient) = recipient {
-
-                    if let Some(other_search) = search.split() {
-                        // ... share some work with it if we have any.
-                        self.share_work(recipient, other_search);
-                    } else {
-                        // ... push it back onto the idle queue if we don't have any work for it.
-                        self.waiting.write().unwrap().push(recipient);
-                    }
+            // Check for incoming messages and respond to them
+            if let Some(msg) = self.incoming_message() {
+                match msg {
+                    Message::Quit            => return false,
+                    Message::GetWork(worker) => self.send_work(worker, Some(search)),
+                    _                        => unreachable!(),
                 }
             }
         }
     }
 
-    /// Send the result of the search back to the master
-    fn send_result(&self, result: Option<TcSeq<T>>) {
+    /// Get the next piece of work to work on.  Returns `Some(Search<T>)` if we successfully
+    /// received some work.  Returns `None` if no thread has any work, that is, everybody is idle.
+    /// In this case, the search should be aborted.
+    fn get_work(&self) -> Option<Search<T>> {
 
-        // We're done, go into idle state
-        let is_last_idle_thread = {
-            let mut waiting = self.waiting.write().unwrap();
-            waiting.push(self.id);
-            waiting.len() == self.num_workers
+        self.incoming.set_state(false);
+
+        let mut keep_trying = true;
+        while keep_trying || self.id != 0 {
+
+            // Check whether we should quit and either do so or yield the processor to other threads.
+            if let Some(msg) = self.incoming_message() {
+                match msg {
+                    Message::Quit                   => return None,
+                    Message::GetWork(worker)        => self.send_work(worker, None),
+                    Message::SendWork(Some(search)) => return Some(search),
+                    Message::SendWork(None)         => unreachable!(),
+                }
+            }
+            yield_now();
+
+            // Try to find a worker from whom we can steal work.  If we get a quit message in the
+            // process, exit.
+            keep_trying = false;
+            for worker in self.workers.iter() {
+                match worker.send_if(State::Busy, || Message::GetWork(self.id)) {
+                    Status::FailState => {},
+                    Status::FailFull  => keep_trying = true,
+                    Status::Success   => match self.incoming.recv() {
+                        Message::Quit => {
+                            return None;
+                        },
+                        Message::GetWork(worker) => {
+                            self.send_work(worker, None);
+                        },
+                        Message::SendWork(None) => {
+                            keep_trying = true;
+                        },
+                        Message::SendWork(Some(mut search)) => {
+                            if search.restrict_to_next_top_branch() {
+                                self.incoming.set_state(true);
+                                return Some(search);
+                            } else {
+                                keep_trying = true;
+                            }
+                        },
+                    },
+                }
+            }
+        }
+
+        // If worker 0 does not find a worker to steal work from, it has to ask the master for more
+        // work.
+        self.master.send_drop(None);
+        match self.incoming.recv() {
+            Message::Quit => None,
+            Message::SendWork(search) => {
+                self.incoming.set_state(true);
+                search
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    /// Send work to another worker
+    fn send_work(&self, worker: usize, search: Option<&mut Search<T>>) {
+        let success = {
+            let package_search = || {
+                let search_copy = match &search {
+                    &None             => None,
+                    &Some(ref search) => Some((*search).clone()),
+                };
+                Message::SendWork(search_copy)
+            };
+            self.workers[worker].send_if(State::Idle, package_search) == Status::Success
         };
 
-        // Send result to master if the search was successful or this is the last idle thread and a
-        // new search should start.
-        if result.is_some() || is_last_idle_thread {
-            self.result.send(FromWorker::Result(result)).unwrap();
+        if success {
+            search.map(|search| search.skip_next_top_branch());
         }
     }
 
-    /// Send part of my workload to another worker
-    fn share_work(&self, recipient: usize, search: Search<T>) {
-        self.result.send(FromWorker::WorkPackage(recipient, search)).unwrap();
+    /// Send a result back to the master
+    fn send_result(&self, seq: TcSeq<T>) {
+        self.master.send_overwrite(Some(seq));
     }
+
+    /// Check whether we have a message to process
+    fn incoming_message(&self) -> Option<Message<T>> {
+        self.incoming.try_recv()
+    }
+}
+
+/// The type of message that can be sent to a worker
+#[derive(Clone)]
+pub enum Message<T> {
+
+    /// Quit
+    Quit,
+
+    /// Request for work from another worker
+    GetWork(usize),
+
+    /// Send work to this worker.  This may be `None` so a worker can respond to a work request
+    /// from another worker even if it itself has no work left to send to that other worker.
+    SendWork(Option<Search<T>>),
 }
 
 #[cfg(test)]
 mod tests {
 
+    use super::super::channel::channel;
     use newick;
     use std::fmt::Write;
     use super::*;
@@ -212,18 +243,23 @@ mod tests {
     #[test]
     fn start_stop_workers() {
 
-        const NUM_WORKERS: usize        = 32;
-        let (sender, receiver)          = channel();
-        let waiting                     = Arc::new(RwLock::new(vec![]));
-        let workers: Vec<Worker<usize>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
+        const NUM_WORKERS: usize = 32;
+        let (master_send,  _) = channel();
+        let (worker_sends, worker_recvs): (Vec<Sender<Message<usize>>>, Vec<_>) =
+            (0..NUM_WORKERS).map(|_| channel()).unzip();
+        let worker_threads: Vec<_> = worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, Some(1)))
+            .collect();
 
-        match receiver.recv().unwrap() {
-            FromWorker::Result(res) => assert!(res.is_none()),
-            _                       => panic!("Expected a result, not a workload"),
+        for worker in worker_sends.iter() {
+            worker.send_overwrite(Message::Quit);
         }
 
-        for worker in workers { worker.quit(); }
+        for worker in worker_threads {
+            worker.join().unwrap();
+        }
     }
 
     /// Test successful search with parameter 0
@@ -279,34 +315,29 @@ mod tests {
 
         assert!(!search.success());
 
-        const NUM_WORKERS: usize         = 32;
-        let (sender, receiver)           = channel();
-        let waiting                      = Arc::new(RwLock::new(vec![]));
-        let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
-        match receiver.recv().unwrap() {
-            FromWorker::Result(res) => assert!(res.is_none()),
-            _                       => panic!("Expected a result, not a workload"),
+        const NUM_WORKERS: usize = 32;
+        let (master_send,  master_recv) = channel();
+        master_recv.set_state(true);
+        let (worker_sends, worker_recvs): (Vec<Sender<Message<String>>>, Vec<_>) =
+            (0..NUM_WORKERS).map(|_| channel()).unzip();
+        let worker_threads: Vec<_> = worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, Some(1)))
+            .collect();
+
+        assert!(master_recv.recv().is_none());
+
+        worker_sends[0].send_overwrite(Message::SendWork(Some(search)));
+
+        assert!(master_recv.recv().is_none());
+
+        for worker in worker_sends.iter() {
+            worker.send_overwrite(Message::Quit);
         }
 
-        let i = waiting.write().unwrap().pop().unwrap();
-        workers[i].work_on(search);
-
-        loop {
-
-            match receiver.recv().unwrap() {
-
-                FromWorker::Result(None) => {
-                    for worker in workers { worker.quit(); }
-                    return;
-                },
-
-                FromWorker::Result(Some(_)) =>
-                    panic!("search_0_fail should have failed"),
-
-                FromWorker::WorkPackage(recipient, search) =>
-                    workers[recipient].work_on(search),
-            }
+        for worker in worker_threads {
+            worker.join().unwrap();
         }
     }
 
@@ -327,55 +358,53 @@ mod tests {
         assert!(!search.success());
 
         search.increase_max_weight();
-        const NUM_WORKERS: usize         = 32;
-        let (sender, receiver)           = channel();
-        let waiting                      = Arc::new(RwLock::new(vec![]));
-        let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
-        match receiver.recv().unwrap() {
-            FromWorker::Result(res) => assert!(res.is_none()),
-            _                       => panic!("Expected a result, not a workload"),
+        const NUM_WORKERS: usize = 32;
+        let (master_send,  master_recv) = channel();
+        master_recv.set_state(true);
+        let (worker_sends, worker_recvs): (Vec<Sender<Message<String>>>, Vec<_>) =
+            (0..NUM_WORKERS).map(|_| channel()).unzip();
+        let worker_threads: Vec<_> = worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, Some(1)))
+            .collect();
+
+        assert!(master_recv.recv().is_none());
+
+        worker_sends[0].send_overwrite(Message::SendWork(Some(search)));
+
+        match master_recv.recv() {
+            None => panic!("Expected tree-chlid sequence"),
+            Some(seq) => {
+                assert_eq!(seq.len(), 4);
+
+                let mut string = String::new();
+                let mut first = true;
+                write!(&mut string, "<").unwrap();
+                for pair in seq {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(&mut string, ", ").unwrap();
+                    }
+                    write!(&mut string, "{}", pair).unwrap();
+                }
+                write!(&mut string, ">").unwrap();
+
+                assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
+
+            },
         }
 
-        let i = waiting.write().unwrap().pop().unwrap();
-        workers[i].work_on(search);
+        for worker in worker_sends.iter() {
+            worker.send_overwrite(Message::Quit);
+        }
 
-        loop {
-
-            match receiver.recv().unwrap() {
-
-                FromWorker::Result(Some(seq)) => {
-
-                    for worker in workers { worker.quit(); }
-
-                    assert_eq!(seq.len(), 4);
-
-                    let mut string = String::new();
-                    let mut first = true;
-                    write!(&mut string, "<").unwrap();
-                    for pair in seq {
-                        if first {
-                            first = false;
-                        } else {
-                            write!(&mut string, ", ").unwrap();
-                        }
-                        write!(&mut string, "{}", pair).unwrap();
-                    }
-                    write!(&mut string, ">").unwrap();
-
-                    assert_eq!(string, "<(a, b), (b, c), (a, c), (c, -)>");
-
-                    return;
-                },
-
-                FromWorker::Result(None) =>
-                    panic!("search_1_success should have succeeded"),
-
-                FromWorker::WorkPackage(recipient, search) =>
-                    workers[recipient].work_on(search),
-            }
+        for worker in worker_threads {
+            worker.join().unwrap();
         }
     }
+
 
     /// Test unsuccessful search with parameter 1
     #[test]
@@ -395,34 +424,29 @@ mod tests {
         assert!(!search.success());
 
         search.increase_max_weight();
-        const NUM_WORKERS: usize         = 32;
-        let (sender, receiver)           = channel();
-        let waiting                      = Arc::new(RwLock::new(vec![]));
-        let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
-        match receiver.recv().unwrap() {
-            FromWorker::Result(res) => assert!(res.is_none()),
-            _                       => panic!("Expected a result, not a workload"),
+        const NUM_WORKERS: usize = 32;
+        let (master_send,  master_recv) = channel();
+        master_recv.set_state(true);
+        let (worker_sends, worker_recvs): (Vec<Sender<Message<String>>>, Vec<_>) =
+            (0..NUM_WORKERS).map(|_| channel()).unzip();
+        let worker_threads: Vec<_> = worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, Some(1)))
+            .collect();
+
+        assert!(master_recv.recv().is_none());
+
+        worker_sends[0].send_overwrite(Message::SendWork(Some(search)));
+
+        assert!(master_recv.recv().is_none());
+
+        for worker in worker_sends.iter() {
+            worker.send_overwrite(Message::Quit);
         }
 
-        let i = waiting.write().unwrap().pop().unwrap();
-        workers[i].work_on(search);
-
-        loop {
-
-            match receiver.recv().unwrap() {
-
-                FromWorker::Result(None) => {
-                    for worker in workers { worker.quit(); }
-                    return;
-                },
-
-                FromWorker::Result(Some(_)) =>
-                    panic!("search_1_fail should have failed"),
-
-                FromWorker::WorkPackage(recipient, search) =>
-                    workers[recipient].work_on(search),
-            }
+        for worker in worker_threads {
+            worker.join().unwrap();
         }
     }
 
@@ -445,52 +469,52 @@ mod tests {
 
         search.increase_max_weight();
         search.increase_max_weight();
-        const NUM_WORKERS: usize         = 32;
-        let (sender, receiver)           = channel();
-        let waiting                      = Arc::new(RwLock::new(vec![]));
-        let workers: Vec<Worker<String>> = (0..NUM_WORKERS).map(
-            |i| Worker::new(i, NUM_WORKERS, Some(1), waiting.clone(), sender.clone())).collect();
-        match receiver.recv().unwrap() {
-            FromWorker::Result(res) => assert!(res.is_none()),
-            _                       => panic!("Expected a result, not a workload"),
+        const NUM_WORKERS: usize = 32;
+        let (master_send,  master_recv) = channel();
+        master_recv.set_state(true);
+        let (worker_sends, worker_recvs): (Vec<Sender<Message<String>>>, Vec<_>) =
+            (0..NUM_WORKERS).map(|_| channel()).unzip();
+        let worker_threads: Vec<_> = worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, Some(1)))
+            .collect();
+
+        assert!(master_recv.recv().is_none());
+
+        worker_sends[0].send_overwrite(Message::SendWork(Some(search)));
+
+        match master_recv.recv() {
+            None => panic!("Expected tree-chlid sequence"),
+            Some(seq) => {
+                let mut string = String::new();
+                let mut first = true;
+                write!(&mut string, "<").unwrap();
+                for pair in seq {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(&mut string, ", ").unwrap();
+                    }
+                    write!(&mut string, "{}", pair).unwrap();
+                }
+                write!(&mut string, ">").unwrap();
+
+                println!("{}", string);
+                assert!(
+                    ["<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+                     "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+                     "<(b, a), (d, e), (d, c), (b, c), (c, e), (a, e), (e, -)>",
+                    ].contains(&&string[..]));
+            },
         }
 
-        let i = waiting.write().unwrap().pop().unwrap();
-        workers[i].work_on(search);
+        for worker in worker_sends.iter() {
+            worker.send_overwrite(Message::Quit);
+        }
 
-        loop {
-
-            match receiver.recv().unwrap() {
-
-                FromWorker::Result(Some(seq)) => {
-                    for worker in workers { worker.quit(); }
-
-                    assert_eq!(seq.len(), 7);
-
-                    let mut string = String::new();
-                    let mut first = true;
-                    write!(&mut string, "<").unwrap();
-                    for pair in seq {
-                        if first {
-                            first = false;
-                        } else {
-                            write!(&mut string, ", ").unwrap();
-                        }
-                        write!(&mut string, "{}", pair).unwrap();
-                    }
-                    write!(&mut string, ">").unwrap();
-
-                    assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
-
-                    return;
-                },
-
-                FromWorker::Result(None) =>
-                    panic!("search_1_success should have succeeded"),
-
-                FromWorker::WorkPackage(recipient, search) =>
-                    workers[recipient].work_on(search),
-            }
+        for worker in worker_threads {
+            worker.join().unwrap();
         }
     }
 }
