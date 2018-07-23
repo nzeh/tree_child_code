@@ -4,9 +4,13 @@
 use std::fmt;
 use tree::Tree;
 
+mod channel;
 mod master;
 mod worker;
 mod search;
+
+use self::master::Master;
+use self::search::Search;
 
 /// An entry in a tree-child sequence
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,8 +37,16 @@ pub fn tree_child_sequence<T: Clone + Send + 'static>(
     limit_fanout:             bool,
     use_redundant_branch_opt: bool) -> TcSeq<T> {
 
-    master::Master::new(trees, num_threads, poll_delay, limit_fanout, use_redundant_branch_opt)
-        .run()
+    // Build the search state and eliminate initial trivial cherries
+    let mut search = Search::new(trees, limit_fanout, use_redundant_branch_opt);
+    search.resolve_trivial_cherries();
+
+    // Do not start a search if the input is trivial
+    if search.success() {
+        search.tc_seq().unwrap()
+    } else {
+        Master::run(search, num_threads, poll_delay)
+    }
 }
 
 /// Let's make pairs printable
@@ -85,6 +97,10 @@ mod tests {
         }
         write!(&mut string, ">").unwrap();
 
-        assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+        assert!(
+            ["<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+             "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+             "<(b, a), (d, e), (d, c), (b, c), (c, e), (a, e), (e, -)>",
+            ].contains(&&string[..]));
     }
 }

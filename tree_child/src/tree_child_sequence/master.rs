@@ -10,13 +10,13 @@
 //! and returns the returned tree-child sequence.  If it receives `None`, then the search was
 //! unsuccessful and the master starts another iteration after increasing the target weight by one.
 
+use std::clone::Clone;
 use std::mem;
-use std::sync::{Arc, RwLock};
-use std::sync::mpsc::{Receiver, channel};
+use std::thread::JoinHandle;
 use super::TcSeq;
+use super::channel::{channel, Receiver, Sender};
 use super::search::Search;
-use super::worker::{Worker, FromWorker};
-use super::super::tree::Tree;
+use super::worker::{Message, Worker};
 
 /// The master thread
 pub struct Master<T> {
@@ -24,85 +24,76 @@ pub struct Master<T> {
     /// The problem instance to be solved
     search: Search<T>,
 
-    /// The worker threads controlled by this master,
-    workers: Vec<Worker<T>>,
+    /// The list of workers controlled by this master
+    worker_threads: Vec<JoinHandle<()>>,
 
-    /// The idle queue, holds the IDs of all idle workers
-    waiting: Arc<RwLock<Vec<usize>>>,
+    /// The receiving end of the master channel
+    incoming: Receiver<Option<TcSeq<T>>>,
 
-    /// The queue used to receive messages from the workers
-    queue: Receiver<FromWorker<T>>,
+    /// The message queues for the workers
+    workers: Vec<Sender<Message<T>>>,
 }
 
 impl<T: Clone + Send + 'static> Master<T> {
 
-    /// Initialize the master
+    /// Run the master
     ///
-    /// - `trees` is the set of trees for which to construct a tree-child sequence
+    /// - `search` the search state to use as the start of the search
     /// - `num_workers` is the number of worker threads to be used for parallelizing the search
     /// - `poll_delay` is the number of branching steps a worker should complete before checking
     ///   for idle threads to share work with
-    /// - `limit_fanout` controls whether a branch with too many non-trivial cherries should be
-    ///   aborted.
-    /// - `use_redundant_branch_opt` controls whether a branch should ignore non-trivial cherries
-    ///   that were already resolved with the exact same set of trees in a previous branch.
-    pub fn new(
-        trees:                     Vec<Tree<T>>,
-        num_workers:               usize,
-        poll_delay:                Option<usize>,
-        limit_fanout:              bool,
-        use_rendundant_branch_opt: bool) -> Self {
+    pub fn run(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> TcSeq<T> {
 
-        let search             = Search::new(trees, limit_fanout, use_rendundant_branch_opt);
-        let (sender, receiver) = channel();
-        let waiting            = Arc::new(RwLock::new(vec![]));
-        let workers            = (0..num_workers)
-            .map(|i| Worker::new(i, num_workers, poll_delay, waiting.clone(), sender.clone()))
-            .collect();
+        let mut master = Self::new(search, num_workers, poll_delay);
 
-        Master { search, workers, waiting, queue: receiver }
+        loop {
+            if let Some(seq) = master.result() {
+                master.stop_workers();
+                return seq;
+            }
+            master.start_new_search();
+        }
     }
 
-    /// Run the master thread
-    pub fn run(mut self) -> TcSeq<T> {
+    /// Create a new Master
+    fn new(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> Self {
 
-        // Resolve trivial cherries before starting the search
-        self.search.resolve_trivial_cherries();
+        let (master_send,  master_recv) = channel();
+        let (worker_sends, worker_recvs): (Vec<_>, Vec<_>) =
+            (0..num_workers).map(|_| channel()).unzip();
+        let worker_threads =
+            worker_recvs.into_iter().enumerate()
+            .map(|(id, worker_recv)|
+                 Worker::spawn(
+                     id, master_send.clone(), worker_sends.clone(), worker_recv, poll_delay))
+            .collect();
 
-        // Do not start a search if the input is trivial
-        if self.search.success() {
-            self.stop_workers();
-            return self.search.tc_seq().unwrap();
-        }
-
-        // Loop until we find a solution
-        loop {
-            match self.queue.recv().unwrap() {
-
-                // Some worker reported success.  Stop the workers and return the result.
-                FromWorker::Result(Some(seq)) => { self.stop_workers(); return seq; },
-
-                // All workers failed, start a new search
-                FromWorker::Result(None) => self.start_new_search(),
-
-                // Some worker wants to share work with recipient.  Send it to recipient.
-                FromWorker::WorkPackage(recipient, search) =>
-                    self.workers[recipient].work_on(search),
-            }
-        }
+        Master { search, worker_threads, incoming: master_recv, workers: worker_sends }
     }
 
     /// Start a new search.
     fn start_new_search(&mut self) {
         self.search.increase_max_weight();
-        let worker = self.waiting.write().unwrap().pop().unwrap();
-        self.workers[worker].work_on(self.search.clone());
+        self.workers[0].send_overwrite(Message::SendWork(Some(self.search.clone())));
+    }
+
+    /// Wait for the result of the current search
+    fn result(&self) -> Option<TcSeq<T>> {
+        self.incoming.recv()
     }
 
     /// Stop all workers
     fn stop_workers(&mut self) {
-        let workers = mem::replace(&mut self.workers, vec![]);
-        for worker in workers { worker.quit(); }
+        let workers        = mem::replace(&mut self.workers, vec![]);
+        let worker_threads = mem::replace(&mut self.worker_threads, vec![]);
+
+        for worker in workers {
+            worker.send_overwrite(Message::Quit);
+        }
+
+        for worker in worker_threads {
+            worker.join().unwrap();
+        }
     }
 }
 
@@ -125,8 +116,11 @@ mod tests {
             newick::parse_forest(&mut builder, newick).unwrap();
             builder.trees()
         };
-        let master = Master::new(trees, 32, Some(1), true, true);
-        let seq    = master.run();
+
+        let mut search = Search::new(trees, true, true);
+        search.resolve_trivial_cherries();
+
+        let seq = Master::run(search, 32, Some(1));
 
         assert_eq!(seq.len(), 7);
 
@@ -143,6 +137,10 @@ mod tests {
         }
         write!(&mut string, ">").unwrap();
 
-        assert_eq!(string, "<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>");
+        assert!(
+            ["<(d, c), (d, e), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+             "<(d, e), (d, c), (b, c), (b, a), (c, e), (a, e), (e, -)>",
+             "<(b, a), (d, e), (d, c), (b, c), (c, e), (a, e), (e, -)>",
+            ].contains(&&string[..]));
     }
 }

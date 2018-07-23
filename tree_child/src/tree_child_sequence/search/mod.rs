@@ -61,30 +61,8 @@ impl<T: Clone> Search<T> {
     // Code for splitting off part of the work in this instance into a new instance
     //----------------------------------------------------------------------------------------------
 
-    /// Split off part of the work of this search into a new instance
-    pub fn split(&mut self) -> Option<Self> {
-
-        while !self.stack.is_empty() {
-
-            // Make a copy of this search
-            let mut other_search = self.clone();
-
-            // Skip the next top branch in this search
-            self.skip_next_top_branch();
-
-            // Limit the copy to the skipped top branch and return that branch unless it is not a
-            // feasible branch
-            if other_search.limit_to_next_top_branch() {
-                return Some(other_search);
-            }
-        }
-
-        // No feasible branches found, return nothing
-        None
-    }
-
     /// Make sure this search does not follow the next available branch at the topmost branch point
-    fn skip_next_top_branch(&mut self) {
+    pub fn skip_next_top_branch(&mut self) {
 
         // Skip the next top branch and record whether we've now skipped all top braches
         let all_branches_skipped = {
@@ -99,9 +77,9 @@ impl<T: Clone> Search<T> {
         }
     }
 
-    /// Rewind this search to its topmost branch point and limit the search to the next available
+    /// Rewind this search to its topmost branch point and restrict the search to the next available
     /// branch at this branch point
-    fn limit_to_next_top_branch(&mut self) -> bool {
+    pub fn restrict_to_next_top_branch(&mut self) -> bool {
 
         // Pop all but the topmost branch point
         self.stack.truncate(1);
@@ -165,7 +143,9 @@ impl<T: Clone> Search<T> {
         });
     }
 
-    /// Try the next branch and return true if there are more branches left to explore
+    /// Try the next branch and return true if there are more branches left to explore.  Return
+    /// `true` if the search should continue, `false` if it should be aborted either because we
+    /// found a solution or because there are no branches left to branch on.
     pub fn branch(&mut self) -> bool {
 
         // Get the next branch to explore
