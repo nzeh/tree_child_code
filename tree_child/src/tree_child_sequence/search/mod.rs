@@ -171,6 +171,11 @@ impl<T: Clone> Search<T> {
                     self.prune_leaf(u, *tree);
                 }
 
+                // Reset the cut count for v in all cherries.  This is necessary to ensure that
+                // the redundant branch optimization does not assume it can move any branch that
+                // cuts v before the pair (u,v) in the tree-child sequence.
+                self.reset_cut_counts(v);
+
                 // Resolve all trivial cherries this has created and report success or recurse
                 // if all trivial cherries were resolved successfully.
                 if self.resolve_trivial_cherries() {
@@ -294,7 +299,8 @@ impl<T: Clone> Search<T> {
                 Op::SuppressNode(node, tree)           => self.undo_suppress_node(node, tree),
                 Op::PushTreeChildPair                  => self.undo_push_tree_child_pair(),
                 Op::IncreaseWeight                     => self.undo_increase_weight(),
-                Op::Cut(cherry, first_leaf, cut_count) => self.undo_cut(cherry, first_leaf, cut_count),
+                Op::Cut(cherry, first_leaf, cut_count) => self.restore_cut_count(cherry, first_leaf, cut_count),
+                Op::ResetCutCounts(reset_cherries)     => self.restore_cut_counts(reset_cherries),
             }
         }
     }
@@ -357,9 +363,23 @@ impl<T: Clone> Search<T> {
         cut_count
     }
 
-    /// Undo cutting of a leaf
-    fn undo_cut(&mut self, cherry_ref: cherry::Ref, first_leaf: bool, cut_count: usize) {
+    /// Reset the cut counts of all non-trivial cherries that contain w
+    fn reset_cut_counts(&mut self, w: Leaf) {
+        if let Some(reset_cherries) = self.state.reset_cut_counts(w) {
+            self.history.record_op(Op::ResetCutCounts(reset_cherries))
+        }
+    }
+
+    /// Restore a cut count saved by cut
+    fn restore_cut_count(&mut self, cherry_ref: cherry::Ref, first_leaf: bool, cut_count: usize) {
         self.state.restore_cut_count(cherry_ref, first_leaf, cut_count);
+    }
+
+    /// Restore multiple cut counts saved by reset_cut_counts
+    fn restore_cut_counts(&mut self, to_restore: Vec<(cherry::Ref, bool, usize)>) {
+        for (cherry_ref, first_leaf, cut_count) in to_restore.into_iter() {
+            self.state.restore_cut_count(cherry_ref, first_leaf, cut_count);
+        }
     }
 
     //----------------------------------------------------------------------------------------------
