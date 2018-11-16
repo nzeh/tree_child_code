@@ -171,17 +171,19 @@ impl<T: Clone> Search<T> {
                     self.prune_leaf(u, *tree);
                 }
 
-                // Resolve all non-trivial-cherries this has created
-                self.resolve_trivial_cherries();
+                // Resolve all trivial cherries this has created and report success or recurse
+                // if all trivial cherries were resolved successfully.
+                if self.resolve_trivial_cherries() {
 
-                // If we found a solution, terminate the search
-                if self.success() {
-                    return false;
-                }
+                    // If we found a solution, terminate the search
+                    if self.success() {
+                        return false;
+                    }
 
-                // If we can still succeed, then create a new branch point for the current state
-                if  self.can_succeed() {
-                    self.start_branch();
+                    // If we can still succeed, then create a new branch point for the current state
+                    if  self.can_succeed() {
+                        self.start_branch();
+                    }
                 }
             }
         }
@@ -251,18 +253,20 @@ impl<T: Clone> Search<T> {
         (cherry, first_leaf, cut_count)
     }
 
-    /// Eliminate all trivial cherries in the current search state.
-    pub fn resolve_trivial_cherries(&mut self) {
+    /// Eliminate all trivial cherries in the current search state.  Return true if this succeds.
+    /// Return false if we find a cherry where both leaves have been cut before.
+    pub fn resolve_trivial_cherries(&mut self) -> bool {
         while let Some(cherry) = self.pop_trivial_cherry() {
 
-            // Order the elements of the cherry so v is guaranteed to be in all
-            // trees.  (This is true for at least one of u and v).
+            // Order the elements of the cherry so v is guaranteed to be in all trees.
             let (u, v) = {
                 let (u, v) = cherry.leaves();
-                if self.state.leaf(v).num_occurrences() < self.state.num_trees() {
+                if self.state.leaf(v).num_occurrences() == self.state.num_trees() {
+                    (u, v)
+                } else if self.state.leaf(u).num_occurrences() == self.state.num_trees() {
                     (v, u)
                 } else {
-                    (u, v)
+                    return false;
                 }
             };
 
@@ -274,6 +278,8 @@ impl<T: Clone> Search<T> {
                 self.prune_leaf(u, *tree);
             }
         }
+
+        true
     }
 
     /// Rewind to a snapshot

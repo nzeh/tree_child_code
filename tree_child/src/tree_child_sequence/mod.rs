@@ -103,4 +103,36 @@ mod tests {
              "<(b, a), (d, e), (d, c), (b, c), (c, e), (a, e), (e, -)>",
             ].contains(&&string[..]));
     }
+
+    /// A regression test with an instance where the code resolved trivial cherries even though
+    /// both leaves in the cherry had already been cut that is we are in fact in a dead branch.
+    #[test]
+    fn regression_test_resolve_trivial_cherries() {
+
+        let trees = {
+            let mut builder = TreeBuilder::<String>::new();
+            let newick = "((a,b),(e,(d,c)));\n(b,(a,(e,(d,c))));\n(b,((e,d),(c,a)));\n";
+            newick::parse_forest(&mut builder, newick).unwrap();
+            builder.trees()
+        };
+
+        let seq = super::tree_child_sequence(trees, 1, None, true, false);
+
+        assert_eq!(seq.len(), 7);
+
+        let mut string = String::new();
+        let mut first  = true;
+        write!(&mut string, "<").unwrap();
+        for pair in seq {
+            if first {
+                first = false;
+            } else {
+                write!(&mut string, ", ").unwrap();
+            }
+            write!(&mut string, "{}", pair).unwrap();
+        }
+        write!(&mut string, ">").unwrap();
+
+        assert_eq!(string, "<(b, a), (c, d), (c, a), (e, d), (a, d), (b, d), (d, -)>");
+    }
 }
