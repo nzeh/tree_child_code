@@ -383,6 +383,21 @@ impl<T: Clone> State<T> {
         cut_count
     }
 
+    /// Reset the cut counts of all non-trivial cherries that contain w
+    pub fn reset_cut_counts(&mut self, w: Leaf) -> Option<Vec<(cherry::Ref, bool, usize)>> {
+        let mut reset_cherries = vec![];
+        for (ix, cherry) in self.non_trivial_cherries.iter_mut().enumerate() {
+            if let Some((first_leaf, old_count)) = cherry.reset_cut_count(w) {
+                reset_cherries.push((cherry::Ref::NonTrivial(ix), first_leaf, old_count));
+            }
+        }
+        if reset_cherries.len() == 0 {
+            None
+        } else {
+            Some(reset_cherries)
+        }
+    }
+
     /// Restore the cut count of a leaf in a cherry
     pub fn restore_cut_count(&mut self, cherry_ref: cherry::Ref, first_leaf: bool, cut_count: usize) {
         let cherry = self.cherry_mut(cherry_ref);

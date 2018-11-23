@@ -1,7 +1,7 @@
 //! This module implements basic operations on cherries.
 
+use std::mem;
 use std::slice;
-
 use tree::Leaf;
 
 /// The data associated with a cherry
@@ -97,6 +97,18 @@ impl Cherry {
     pub fn cut(&mut self, first_leaf: bool) {
         let count = self.num_occurrences();
         self.set_cut_count(first_leaf, count);
+    }
+
+    /// Reset the cut count of this cherry for the indicated leaf.  The leaf may not be part of
+    /// cherry at all.  In this case, no reset happens.
+    pub fn reset_cut_count(&mut self, w: Leaf) -> Option<(bool, usize)> {
+        if self.u == w {
+            Some((true, mem::replace(&mut self.u_trees_cut, 0)))
+        } else if self.v == w {
+            Some((false, mem::replace(&mut self.v_trees_cut, 0)))
+        } else {
+            None
+        }
     }
 
     /// Set the cut count for the given leaf

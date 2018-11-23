@@ -85,6 +85,9 @@ pub enum Op {
     /// whether the first or second leaf of the cherry was cut (bool is true if it's the first),
     /// and the original cut count before the cut.
     Cut(cherry::Ref, bool, usize),
+
+    /// Record the resetting of the cut counts of leaves in a list of cherries
+    ResetCutCounts(Vec<(cherry::Ref, bool, usize)>),
 }
 
 #[cfg(test)]
