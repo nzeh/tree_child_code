@@ -259,21 +259,29 @@ impl<T: Clone> Search<T> {
     }
 
     /// Eliminate all trivial cherries in the current search state.  Return true if this succeds.
-    /// Return false if we find a cherry where both leaves have been cut before.
+    /// Return false if we find a cherry where both leaves have been cut before or which is
+    /// redundant.  In both cases, the branch where we're trying to cut this cherry fails.
     pub fn resolve_trivial_cherries(&mut self) -> bool {
         while let Some(cherry) = self.pop_trivial_cherry() {
 
             // Order the elements of the cherry so v is guaranteed to be in all trees.
-            let (u, v) = {
+            let (u, v, cut_count) = {
                 let (u, v) = cherry.leaves();
                 if self.state.leaf(v).num_occurrences() == self.state.num_trees() {
-                    (u, v)
+                    (u, v, cherry.cut_count(true))
                 } else if self.state.leaf(u).num_occurrences() == self.state.num_trees() {
-                    (v, u)
+                    (v, u, cherry.cut_count(false))
                 } else {
                     return false;
                 }
             };
+
+            // Do not explore this branch further if we're using redundant branch optimization and
+            // the number of trees where we'd cut u is the same as the last time we considered
+            // cutting (u, v).
+            if self.use_redundant_branch_opt && cut_count == cherry.num_occurrences() {
+                return false;
+            }
 
             // Add (u, v) as a cherry to the cherry picking sequence
             self.push_trivial_tree_child_pair(u, v);
