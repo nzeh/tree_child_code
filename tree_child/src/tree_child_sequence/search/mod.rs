@@ -171,11 +171,6 @@ impl<T: Clone> Search<T> {
                     self.prune_leaf(u, *tree);
                 }
 
-                // Reset the cut count for v in all cherries.  This is necessary to ensure that
-                // the redundant branch optimization does not assume it can move any branch that
-                // cuts v before the pair (u,v) in the tree-child sequence.
-                self.reset_cut_counts(v);
-
                 // Resolve all trivial cherries this has created and report success or recurse
                 // if all trivial cherries were resolved successfully.
                 if self.resolve_trivial_cherries() {
@@ -455,12 +450,14 @@ impl<T: Clone> Search<T> {
     fn push_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.history.record_op(Op::PushTreeChildPair);
         self.state.push_trivial_tree_child_pair(u, v);
+        self.reset_cut_counts(v);
     }
 
     /// Add a non-trivial cherry to the cherry picking sequence
     fn push_non_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.history.record_op(Op::PushTreeChildPair);
         self.state.push_non_trivial_tree_child_pair(u, v);
+        self.reset_cut_counts(v);
     }
 
     /// Undo the recording of a cherry
