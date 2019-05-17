@@ -45,5 +45,5 @@ pub fn tree_child_sequence_or_network(
 fn tc_seq<T: Clone + Send + 'static>(cfg: &app::Config, trees: Vec<Tree<T>>) -> tc::TcSeq<T> {
         tc::tree_child_sequence(trees,
                                 cfg.num_threads, cfg.poll_delay, cfg.limit_fanout,
-                                cfg.use_redundant_branch_opt)
+                                cfg.use_redundant_branch_opt, cfg.binary)
 }

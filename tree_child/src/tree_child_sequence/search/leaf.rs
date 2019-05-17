@@ -1,25 +1,30 @@
 //! This module implements basic operations on leaves during the search.
 
-use std::slice;
 use super::cherry;
+use std::slice;
 
 /// The data associated with a leaf
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 #[derive(Clone)]
 pub struct Leaf {
-
     /// The number of trees this leaf still occurs in
     num_occurrences: usize,
+
+    /// The number of times this leaf has been pruned
+    times_pruned: usize,
 
     /// The cherries this leaf is part of
     cherries: Vec<cherry::Ref>,
 }
 
 impl Leaf {
-
     /// Create a new leaf occurring in the given number of trees
     pub fn new(num_occurrences: usize) -> Self {
-        Self { num_occurrences, cherries: vec![] }
+        Self {
+            num_occurrences,
+            times_pruned: 0,
+            cherries: vec![],
+        }
     }
 
     /// Increase the number of occurrences of this leaf
@@ -35,6 +40,21 @@ impl Leaf {
     /// The number of occurrences of this leaf
     pub fn num_occurrences(&self) -> usize {
         self.num_occurrences
+    }
+
+    /// Increase the count of how often this leaf has been pruned
+    pub fn increase_times_pruned(&mut self) {
+        self.times_pruned += 1;
+    }
+
+    /// Decrease the count of how often this leaf has been pruned
+    pub fn decrease_times_pruned(&mut self) {
+        self.times_pruned -= 1;
+    }
+
+    /// The number of times this leaf has been pruned
+    pub fn times_pruned(&self) -> usize {
+        self.times_pruned
     }
 
     /// The number of cherries this leaf participates in

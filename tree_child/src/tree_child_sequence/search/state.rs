@@ -448,21 +448,29 @@ impl<T: Clone> State<T> {
     /// Push a trivial pair to the end of the tree-child sequence
     pub fn push_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.tc_seq.push(Pair::Trivial(u, v));
+        self.leaf_mut(u).increase_times_pruned();
     }
 
     /// Push a non-trivial pair to the end of the tree-child sequence
     pub fn push_non_trivial_tree_child_pair(&mut self, u: Leaf, v: Leaf) {
         self.tc_seq.push(Pair::NonTrivial(u, v));
+        self.leaf_mut(u).increase_times_pruned();
     }
 
     /// Push the final pair in the tree-child sequence
     pub fn push_final_tree_child_pair(&mut self, leaf: Leaf) {
         self.tc_seq.push(Pair::Final(leaf));
+        self.leaf_mut(leaf).increase_times_pruned();
     }
 
     /// Remove the last pair form the tree-child sequence
     pub fn pop_tree_child_pair(&mut self) {
-        self.tc_seq.pop();
+        let leaf = match self.tc_seq.pop().unwrap() {
+            Pair::Trivial(u, _) => u,
+            Pair::NonTrivial(u, _) => u,
+            Pair::Final(leaf) => leaf,
+        };
+        self.leaf_mut(leaf).decrease_times_pruned();
     }
 
     /// Retrieve the tree-child sequence

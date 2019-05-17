@@ -6,7 +6,6 @@ use num_cpus;
 
 /// A structure to hold all the configuration parameters
 pub struct Config {
-
     /// The name of the input file
     pub input: String,
 
@@ -30,10 +29,13 @@ pub struct Config {
 
     /// Compute a tree-child network instead of a tree-child sequence as output
     pub compute_network: bool,
+
+    /// Look for a binary tree-child sequence or network (every reticulation node has exactly two
+    /// parents)
+    pub binary: bool,
 }
 
 impl Config {
-
     /// Create a new config object from the command line arguments
     pub fn new() -> Self {
         // Define the acceptable arguments
@@ -117,6 +119,13 @@ of threads is greater than one."),
                 .takes_value(false)
                 .help("output a tree-child network")
                 .long_help("output a tree-child network in extended Newick format"),
+            Arg::with_name("binary")
+                .short("b")
+                .long("binary")
+                .required(false)
+                .takes_value(false)
+                .help("find a binary tree-child sequence or network")
+                .long_help("find a binary tree-child sequence or network"),
         ];
 
         // Parse the arguments
@@ -128,18 +137,26 @@ of threads is greater than one."),
             .args(&args)
             .get_matches();
 
-        let input                    = args.value_of("input").unwrap().to_string();
-        let output                   = args.value_of("output").map(|s| s.to_string());
-        let use_clustering           = !args.is_present("dont_use_clustering");
+        let input = args.value_of("input").unwrap().to_string();
+        let output = args.value_of("output").map(|s| s.to_string());
+        let use_clustering = !args.is_present("dont_use_clustering");
         let use_redundant_branch_opt = args.is_present("optimize_redundant_branches");
-        let limit_fanout             = !args.is_present("dont_limit_fanout");
-        let num_threads              = num_threads(args.value_of("num_threads"));
-        let poll_delay               = poll_delay(args.value_of("poll_delay"), num_threads);
-        let compute_network          = !args.is_present("compute_sequence");
+        let limit_fanout = !args.is_present("dont_limit_fanout");
+        let num_threads = num_threads(args.value_of("num_threads"));
+        let poll_delay = poll_delay(args.value_of("poll_delay"), num_threads);
+        let compute_network = !args.is_present("compute_sequence");
+        let binary = args.is_present("binary");
 
         Self {
-            input, output, use_clustering, use_redundant_branch_opt, limit_fanout,
-            num_threads, poll_delay, compute_network,
+            input,
+            output,
+            use_clustering,
+            use_redundant_branch_opt,
+            limit_fanout,
+            num_threads,
+            poll_delay,
+            compute_network,
+            binary,
         }
     }
 }
@@ -147,9 +164,11 @@ of threads is greater than one."),
 /// Check that the provided number of threads is valid
 fn validate_num_threads(arg: String) -> Result<(), String> {
     match arg.parse::<usize>() {
-        Ok(x)  if x > 0                          => Ok(()),
+        Ok(x) if x > 0 => Ok(()),
         Err(_) if arg.to_lowercase() == "native" => Ok(()),
-        _ => Err(String::from("Number of threads must be \"native\" or a positive integer")),
+        _ => Err(String::from(
+            "Number of threads must be \"native\" or a positive integer",
+        )),
     }
 }
 
@@ -157,26 +176,28 @@ fn validate_num_threads(arg: String) -> Result<(), String> {
 fn num_threads(arg: Option<&str>) -> usize {
     match arg.map(|arg| arg.parse::<usize>()) {
         Some(Ok(n)) => n,
-        Some(_)     => num_cpus::get(),
-        None        => 1
+        Some(_) => num_cpus::get(),
+        None => 1,
     }
 }
 
 /// Check that the poll delay is valid
 fn validate_poll_delay(arg: String) -> Result<(), String> {
     match arg.parse::<usize>() {
-        Ok(x)  if x > 0                            => Ok(()),
+        Ok(x) if x > 0 => Ok(()),
         Err(_) if arg.to_lowercase() == "infinite" => Ok(()),
-        _ => Err(String::from("Poll delay must be \"infinite\" or a positive integer")),
+        _ => Err(String::from(
+            "Poll delay must be \"infinite\" or a positive integer",
+        )),
     }
 }
 
 /// Query the poll delay to use
 fn poll_delay(arg: Option<&str>, num_threads: usize) -> Option<usize> {
     match arg.map(|arg| arg.parse::<usize>()) {
-        Some(Ok(n))              => Some(n),
-        Some(_)                  => None,
+        Some(Ok(n)) => Some(n),
+        Some(_) => None,
         None if num_threads == 1 => None,
-        _                        => Some(1),
+        _ => Some(1),
     }
 }
