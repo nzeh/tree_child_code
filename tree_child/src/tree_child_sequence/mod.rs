@@ -8,7 +8,6 @@ mod worker;
 
 use self::master::Master;
 use self::search::Search;
-use app;
 use tree::Tree;
 use std::fmt;
 
@@ -36,14 +35,14 @@ pub fn tree_child_sequence<T: Clone + Send + 'static>(
     limit_fanout: bool,
     use_redundant_branch_opt: bool,
     binary: bool,
-) -> app::Result<TcSeq<T>> {
+) -> Option<TcSeq<T>> {
     // Build the search state and eliminate initial trivial cherries
     let mut search = Search::new(trees, limit_fanout, use_redundant_branch_opt, binary);
     search.resolve_trivial_cherries();
 
     // Do not start a search if the input is trivial
     if search.success() {
-        Ok(search.tc_seq().unwrap())
+        Some(search.tc_seq().unwrap())
     } else {
         Master::run(search, num_threads, poll_delay)
     }

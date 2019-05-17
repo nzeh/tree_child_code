@@ -120,7 +120,7 @@ of threads is greater than one."),
                 .help("output a tree-child network")
                 .long_help("output a tree-child network in extended Newick format"),
             Arg::with_name("binary")
-                .short("b")
+                .short("B")
                 .long("binary")
                 .required(false)
                 .takes_value(false)

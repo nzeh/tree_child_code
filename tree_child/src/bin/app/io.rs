@@ -6,10 +6,10 @@ use std::fs;
 use std::io;
 use std::io::Read;
 use app;
-use network::TcNet;
-use newick;
-use tree::{Tree, TreeBuilder};
-use tree_child_sequence::TcSeq;
+use tree_child::network::TcNet;
+use tree_child::newick;
+use tree_child::tree::{Tree, TreeBuilder};
+use tree_child::tree_child_sequence::TcSeq;
 
 /// Read the input from a file
 pub fn read_input(file_name: &str) -> app::Result<Vec<Tree<String>>> {

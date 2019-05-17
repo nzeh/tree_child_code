@@ -10,7 +10,6 @@
 //! and returns the returned tree-child sequence.  If it receives `None`, then the search was
 //! unsuccessful and the master starts another iteration after increasing the target weight by one.
 
-use app;
 use super::TcSeq;
 use super::channel::{channel, Receiver, Sender};
 use super::search::Search;
@@ -43,18 +42,18 @@ impl<T: Clone + Send + 'static> Master<T> {
     /// - `num_workers` is the number of worker threads to be used for parallelizing the search
     /// - `poll_delay` is the number of branching steps a worker should complete before checking
     ///   for idle threads to share work with
-    pub fn run(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> app::Result<TcSeq<T>> {
+    pub fn run(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> Option<TcSeq<T>> {
 
         let mut master = Self::new(search, num_workers, poll_delay);
 
         loop {
             if let Some(seq) = master.result() {
                 master.stop_workers();
-                return Ok(seq);
+                return Some(seq);
             }
             if !master.start_new_search() {
                 master.stop_workers();
-                return Err(app::Error::Fail)
+                return None
             }
         }
     }

@@ -1,6 +1,9 @@
+#[macro_use]
+extern crate clap;
+extern crate num_cpus;
 extern crate tree_child;
 
-use tree_child::app;
+mod app;
 
 /// Main function
 fn main() {

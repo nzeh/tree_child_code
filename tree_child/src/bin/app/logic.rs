@@ -3,11 +3,11 @@
 //! order to compute the final result.
 
 use app;
-use clusters;
-use network::TcNet;
-use tree::Tree;
-use tree_child_sequence as tc;
-use tree_child_sequence::TcSeq;
+use tree_child::clusters;
+use tree_child::network::TcNet;
+use tree_child::tree::Tree;
+use tree_child::tree_child_sequence as tc;
+use tree_child::tree_child_sequence::TcSeq;
 
 /// The result of the tree-child sequence/network computation
 pub enum TcResult {
@@ -24,28 +24,27 @@ pub fn tree_child_sequence_or_network(
     trees: Vec<Tree<String>>,
 ) -> app::Result<TcResult> {
     let tc_seq = if cfg.use_clustering {
-        clusters::combine_tc_seqs(
-            clusters::partition(trees)
-                .into_iter()
-                .map(|trees| tc_seq(cfg, trees))
-                .collect::<app::Result<Vec<_>>>()?,
-        )
+        clusters::partition(trees)
+            .into_iter()
+            .map(|trees| tc_seq(cfg, trees))
+            .collect::<Option<Vec<_>>>()
+            .map(|cluster_seqs| clusters::combine_tc_seqs(cluster_seqs))
     } else {
-        tc_seq(cfg, trees)?
+        tc_seq(cfg, trees)
     };
 
-    Ok(if cfg.compute_network {
-        TcResult::Net(TcNet::from_seq(tc_seq))
-    } else {
-        TcResult::Seq(tc_seq)
-    })
+    match (tc_seq, cfg.compute_network) {
+        (Some(tc_seq), true) => Ok(TcResult::Net(TcNet::from_seq(tc_seq))),
+        (Some(tc_seq), false) => Ok(TcResult::Seq(tc_seq)),
+        (None, _) => Err(app::Error::Fail),
+    }
 }
 
 /// Wrapper that call `tc::tree_child_sequence()` with the right arguments extracted from `cfg`
 fn tc_seq<T: Clone + Send + 'static>(
     cfg: &app::Config,
     trees: Vec<Tree<T>>,
-) -> app::Result<tc::TcSeq<T>> {
+) -> Option<tc::TcSeq<T>> {
     tc::tree_child_sequence(
         trees,
         cfg.num_threads,

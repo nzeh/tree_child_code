@@ -1,6 +1,6 @@
 //! This module provides result and error types for the main binary `tc_seq`.
 
-use newick;
+use tree_child::newick;
 use std::fmt;
 use std::io;
 use std::result;
