@@ -448,8 +448,8 @@ impl<T: Clone> Search<T> {
     }
 
     /// Increase the maximum weight of a tree-child sequence we are willing to accept as a solution
-    pub fn increase_max_weight(&mut self) {
-        self.state.increase_max_weight();
+    pub fn increase_max_weight(&mut self) -> bool {
+        self.state.increase_max_weight()
     }
 
     /// Add a trivial cherry to the cherry picking sequence

@@ -1,9 +1,6 @@
 //! This module implements the algorithm for constructing a tree-child sequence for a set of trees.
 //! The function to construct a tree-child sequence is `tree_child_sequence()`.
 
-use std::fmt;
-use tree::Tree;
-
 mod channel;
 mod master;
 mod search;
@@ -11,6 +8,9 @@ mod worker;
 
 use self::master::Master;
 use self::search::Search;
+use app;
+use tree::Tree;
+use std::fmt;
 
 /// An entry in a tree-child sequence
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,14 +36,14 @@ pub fn tree_child_sequence<T: Clone + Send + 'static>(
     limit_fanout: bool,
     use_redundant_branch_opt: bool,
     binary: bool,
-) -> TcSeq<T> {
+) -> app::Result<TcSeq<T>> {
     // Build the search state and eliminate initial trivial cherries
     let mut search = Search::new(trees, limit_fanout, use_redundant_branch_opt, binary);
     search.resolve_trivial_cherries();
 
     // Do not start a search if the input is trivial
     if search.success() {
-        search.tc_seq().unwrap()
+        Ok(search.tc_seq().unwrap())
     } else {
         Master::run(search, num_threads, poll_delay)
     }

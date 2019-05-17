@@ -93,8 +93,9 @@ impl<T: Clone> State<T> {
     //----------------------------------------------------------------------------------------------
 
     /// Increase the parameter of the search
-    pub fn increase_max_weight(&mut self) {
+    pub fn increase_max_weight(&mut self) -> bool {
         self.max_weight += 1;
+        self.max_weight < self.leaves.len()
     }
 
     //----------------------------------------------------------------------------------------------
