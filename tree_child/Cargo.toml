@@ -1,6 +1,6 @@
 [package]
 name = "tree_child"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Norbert Zeh <nzeh@cs.dal.ca>"]
 
 [dependencies]
