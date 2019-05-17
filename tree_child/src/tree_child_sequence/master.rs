@@ -10,13 +10,13 @@
 //! and returns the returned tree-child sequence.  If it receives `None`, then the search was
 //! unsuccessful and the master starts another iteration after increasing the target weight by one.
 
-use std::clone::Clone;
-use std::mem;
-use std::thread::JoinHandle;
 use super::TcSeq;
 use super::channel::{channel, Receiver, Sender};
 use super::search::Search;
 use super::worker::{Message, Worker};
+use std::clone::Clone;
+use std::mem;
+use std::thread::JoinHandle;
 
 /// The master thread
 pub struct Master<T> {
@@ -42,16 +42,19 @@ impl<T: Clone + Send + 'static> Master<T> {
     /// - `num_workers` is the number of worker threads to be used for parallelizing the search
     /// - `poll_delay` is the number of branching steps a worker should complete before checking
     ///   for idle threads to share work with
-    pub fn run(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> TcSeq<T> {
+    pub fn run(search: Search<T>, num_workers: usize, poll_delay: Option<usize>) -> Option<TcSeq<T>> {
 
         let mut master = Self::new(search, num_workers, poll_delay);
 
         loop {
             if let Some(seq) = master.result() {
                 master.stop_workers();
-                return seq;
+                return Some(seq);
             }
-            master.start_new_search();
+            if !master.start_new_search() {
+                master.stop_workers();
+                return None
+            }
         }
     }
 
@@ -72,9 +75,13 @@ impl<T: Clone + Send + 'static> Master<T> {
     }
 
     /// Start a new search.
-    fn start_new_search(&mut self) {
-        self.search.increase_max_weight();
-        self.workers[0].send_overwrite(Message::SendWork(Some(self.search.clone())));
+    fn start_new_search(&mut self) -> bool {
+        if self.search.increase_max_weight() {
+            self.workers[0].send_overwrite(Message::SendWork(Some(self.search.clone())));
+            true
+        } else {
+            false
+        }
     }
 
     /// Wait for the result of the current search

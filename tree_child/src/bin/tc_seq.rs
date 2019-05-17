@@ -1,6 +1,9 @@
+#[macro_use]
+extern crate clap;
+extern crate num_cpus;
 extern crate tree_child;
 
-use tree_child::app;
+mod app;
 
 /// Main function
 fn main() {
@@ -14,6 +17,6 @@ fn main() {
 fn real_main() -> app::Result<()> {
     let cfg        = app::Config::new();
     let trees      = app::read_input(&cfg.input)?;
-    let tc_net_seq = app::tree_child_sequence_or_network(&cfg, trees);
+    let tc_net_seq = app::tree_child_sequence_or_network(&cfg, trees)?;
     app::write_output(cfg.output.as_ref().map(|s| &s[..]), tc_net_seq)
 }
