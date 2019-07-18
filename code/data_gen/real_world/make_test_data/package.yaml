@@ -1,10 +1,9 @@
 name:                MakeTestData
 version:             0.1.0.0
-github:              "githubuser/MakeTestData"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2018 Author name here"
+author:              "Norbert Zeh"
+maintainer:          "nzeh@cs.dal.ca"
+copyright:           "2019 Norbert Zeh"
 
 extra-source-files:
 - README.md
