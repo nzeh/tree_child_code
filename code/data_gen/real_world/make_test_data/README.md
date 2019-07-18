@@ -1,45 +1,66 @@
-# Binary trees extracted from the Aquificae data set
+# Data Transformer for Real-World Data
 
-## Generated data
+Given that most real-world data consists of multifurcating trees and those trees often do not have the same label sets, this data is not suitable for testing code that can only handle binary trees and only trees with identical label sets.  This is some code that *heuristically*
 
-The generated data is in the `data/` subdirectory.
+1. Extracts as many trees as possible that share a given target number of leaves and
+2. Resolves multifurcation in a way that tries to avoid introducing discordance between the trees resulting only from this resolution.
 
-This data was extracted from the Aquificae data set used in
+Details of the procedure used to do this are described below.
 
-Whidden, Zeh, Beiko.  Supertrees Based on the Subtree Prune-and-Regraft Distance.
-_Systematic Biology_, 63(4):566-581, 2014.
+## How to Compile
 
-## The code
+To compile, you need an up-to-date Haskell compiler (ghc).  The code should compile fine with *vanilla ghc + cabal*, *Haskell platform* or *Haskell Stack*.  However, the only method "officially" supported at this point is using *Haskell Stack*.  Information on installing *Haskell Stack* can be found at [haskellstack.org]().
 
-The goal of the extraction code was to
+To compile (without installing), run
 
-- Extract binary trees with identical label sets,
-- Extract as many trees as possible, and
-- Resolve multifurcations in a way that preserves the "spirit" of the data, that is,
-  as much as possible, without introducing bipartitions that disagree between trees.
+```bash
+$ stack build
+```
+The built executable can then be found in
+`.stack-work/install/x86_64-osx/lts-12.13/8.4.3/bin/MakeTestData-exe`.
 
-This was done using the following procedure:
+To compile and also copy `MakeTestData-exe` to `$HOME/.local/bin`, run
 
-### Choosing Labels and Trees
+```shell
+$ stack install
+```
 
-We constructed a priority queue over the set of labels with the priority of
-every label equal to the number of trees it occurs in.  Given the number of
-leaves we want the extracted trees to have, we repeated the following `numLeaves` times:
+## How to Run
+
+Running
+
+```shell
+$ MakeTestData-exe
+```
+
+prints a brief usage message that lists the expected arguments:
+
+```
+USAGE: MakeTestData <leaf count> <input file> <output file>
+```
+
+- `leaf count` is the desired number of leaves the extracted trees should have.
+- `input file` is the file that contains the set of multifurcating trees from which the binary trees are to be extracted.  This file must be in **Newick format**.
+- `output file` is the file where the generated trees will be written.  Again, these trees will be written in **Newick format**.
+
+The parser can handle labels on internal nodes as well as branch lengths as part of the input.  These labels and branch lengths are discarded in the output file.
+
+## Description of the Algorithm
+
+### Tree Extraction
+
+The set of all labels is placed in a priority queue.  The priority of each label is the number of trees it occurs in.  The following step is then repeated `leaf count` times:
 
 - Choose the most frequent leaf.
 - Delete all trees that do not contain this leaf.
 - Decrease the occurrence counts of all leaves in the deleted trees so their new occurrence
   counts reflect their numbers of occurrences in the remaining trees.
 
-Once this procedure finishes, we have a set labels and the set of all trees in
-the input data set that contain these labels.  We compute the restriction of
-every tree in this subset to the set of chosen labels.
+This produces a set of trees that (at least) share the chosen set of leaves.  The final step of the tree extraction procedure is to restrict each of the selected trees to the selected set of leaves (in order to ensure that all trees have the same label set).
 
-### Resolving Multifurcations
+### Tree Resolution
 
-In order to create trees that are "as consistent with each other as possible", we resolved
-multifurcations in a way that does not increase the triplet distance between the trees too
-much.  We repeated the following process until all trees were binary:
+This step uses the triplet distance (the number of triplets that disagree between each pair of trees, summed over all pairs) between the chosen trees as the measure of discordance.  Each resolution step aims to increase the triplet distance as little as possible.  The tree resolution procedure repeats the following step until all trees are binary:
 
 - Inspect the trees in order.
 - For each tree, inspect its multifurcations in an arbitrary order.
