@@ -22,7 +22,7 @@ pub fn read_input(file_name: &str) -> app::Result<Vec<Tree<String>>> {
 
 /// Write the result to a file or stdout
 pub fn write_output(file_name: Option<&str>, tc_result: app::TcResult) -> app::Result<()> {
-    let mut file: Box<io::Write> = match file_name {
+    let mut file: Box<dyn io::Write> = match file_name {
         Some(file_name) => Box::new(fs::File::create(file_name)?),
         None            => Box::new(io::stdout()),
     };

@@ -37,7 +37,7 @@ impl From<newick::Error> for Error {
 /// Displaying an AppError shows what type of error it wraps and the message of the wrapped error
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (err_type, msg): (&str, &fmt::Display) = match self {
+        let (err_type, msg): (&str, &dyn fmt::Display) = match self {
             Error::IOError(e) => ("I/O error", e),
             Error::ParseError(e) => ("Parse error", e),
             Error::Fail => ("Error", &"This set of input trees has no binary tree-child network"),
