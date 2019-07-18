@@ -27,7 +27,7 @@ These are the input files used in our experiments.  These files are named in the
 
 ## Results
 
-The file `tc_seq_vs_hybroscale.txt` contains the timing results of all runs performed on the data in `inputs` using out `tc_net` algorithm and *Hybroscale*.  Each line in this file is of the format
+The file `tc_seq_vs_hybroscale.txt` contains the timing results of all runs performed on the data in `inputs` using our `tc_seq` algorithm and *Hybroscale*.  Each line in this file is of the format
 
 ```
 input_name algorithm k level t1 t2 t3 timeout errorInFile
@@ -36,10 +36,9 @@ input_name algorithm k level t1 t2 t3 timeout errorInFile
 where
 
 - `input_name` is the name of the file in `inputs/used` used for the run.
-- `algorithm` is `Hybroscale` is Hybroscale was used and `timeLimit3600-Alg-p8-w100-r` when `tc_net` was run with a time limit of 3,600s, options `-p8` and `-w100` and using cluster reduction and redundant branch elimination. 
+- `algorithm` is `Hybroscale` is Hybroscale was used and `timeLimit3600-Alg-p8-w100-r` when `tc_seq` was run with a time limit of 3,600s, options `-p8` and `-w100` and using cluster reduction and redundant branch elimination. 
 - `k` is the number of reticulations in the computed network.
 - `level` is the level of the computed network.
 - `t1`, `t2`, `t3` are the three times reported by the `time` utility: wall clock time, total CPU time across all threads, and system time.
 - `timeout` is `True` if the run exceeded the time limit of 3,600s.  In this case, `t1`, `t2`, and `t3` are recorded as `9999`.
 - `errorInFile` is `True` if there was some error loading the file (`False` in all instances).
-
