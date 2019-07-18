@@ -2,7 +2,7 @@
 
 This is all the supporting code and test data for the paper
 
-> **A Practical Fixed-Parameter Algorithm for Constructing Tree-Child Networks from Multiple Binary Trees**
+> **A Practical Fixed-Parameter Algorithm for Constructing Tree-Child Networks from Multiple Binary Trees**  
 > *Leo van Iersel, Remie Janssen, Mark Jones, Yukihiro Murakami, and Norbert Zeh*
 
 The repository is organized as follows:
