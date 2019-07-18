@@ -1,0 +1,18 @@
+input:          Filename for input
+algorithm:      Either Hybroscale, or the parameters used in our algorithm
+leaves:         The number of leaves in the trees of the input
+trees:          The number of trees in the input
+reticulations:  The reticulation number of the solution network/weight of the tree-child sequence
+level:          The level of the solution network (Only for our algorithm, not for Hybroscale)
+t1:             First output of the `time' command in the linux terminal 
+                i.e., running time used as data in the paper as it is the clock time of the algorithm;  
+t2:             Second output of the time command
+t3:             Third output of the time command
+time_out:       True exactly when the algorithm stops because the time limit has been reached. In that case: t1 is set to 9999, reticulations=-leaves, and level=0
+error_in_file:  True exactly when there was a problem with reading the data (should not occur)
+
+
+
+
+
+Note: for some inputs in 'HybroVsNorbert_Synthetic' there is no information for Hybroscale. This is because it ran out of memory. 
