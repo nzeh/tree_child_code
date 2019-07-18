@@ -1,8 +1,0 @@
-Data                      ; Input set
-WithoutBR                 ; Synthetic_TestLimits (limited reticulation number; i.e. for each number of trees until input no. 105)
-TestThreads               ; Synthetic_TestLimits SUBSET (Hand-picked for suitable running time)
-TestW                     ; Synthetic_TestLimits SUBSET (Hand-picked for suitable running time)
-LimitsNorbertSynthetic    ; Synthetic_TestLimits
-HybroVsNorbert_Synthetic  ; Synthetic_CompareHybro
-HybroVsNorbert_Real       ; Real
- 
