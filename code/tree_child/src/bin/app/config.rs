@@ -63,15 +63,13 @@ impl Config {
                 .long("no-clustering")
                 .help("disable clustering")
                 .long_help("disable clustering"),
-            Arg::with_name("optimize_redundant_branches")
+            Arg::with_name("dont_eliminate_redundant_branches")
                 .required(false)
                 .takes_value(false)
                 .short("r")
-                .long("redundant-branch-opt")
-                .help("enable redundant branch elimination")
-                .long_help(
-"do not explore branches that resolve the same cherries already resolved in sibling branches \
-(EXPERIMENTAL)"),
+                .long("no-redundant-branch-opt")
+                .help("disable redundant branch elimination")
+                .long_help("disable redundant branch elimination"),
             Arg::with_name("dont_limit_fanout")
                 .required(false)
                 .takes_value(false)
@@ -89,8 +87,8 @@ impl Config {
                 .validator(validate_num_threads)
                 .help("the number of threads to use")
                 .long_help(
-"the number of threads to use; \"native\" = one thread per logical core. \
-If this option is absent, this is equivalent to \"-p 1\" (single-threaded execution)."),
+"the number of threads to use; \"native\" = two threads per core. \
+If this option is absent, this is equivalent to \"-p native\"."),
             Arg::with_name("poll_delay")
                 .short("w")
                 .long("poll-delay")
@@ -102,7 +100,7 @@ If this option is absent, this is equivalent to \"-p 1\" (single-threaded execut
                 .long_help(
 "Number of branches to explore between checks for idle threads to share work with; \
 \"infinite\" = disable checks. If this option is absent, this is equivalent to \
-\"-w infinite\" if the number of threads is one and to \"-w 1\" if the number \
+\"-w infinite\" if the number of threads is one and to \"-w 100\" if the number \
 of threads is greater than one."),
             Arg::with_name("compute_sequence")
                 .short("s")
@@ -140,7 +138,7 @@ of threads is greater than one."),
         let input = args.value_of("input").unwrap().to_string();
         let output = args.value_of("output").map(|s| s.to_string());
         let use_clustering = !args.is_present("dont_use_clustering");
-        let use_redundant_branch_opt = args.is_present("optimize_redundant_branches");
+        let use_redundant_branch_opt = !args.is_present("dont_eliminate_redundant_branches");
         let limit_fanout = !args.is_present("dont_limit_fanout");
         let num_threads = num_threads(args.value_of("num_threads"));
         let poll_delay = poll_delay(args.value_of("poll_delay"), num_threads);
@@ -176,8 +174,7 @@ fn validate_num_threads(arg: String) -> Result<(), String> {
 fn num_threads(arg: Option<&str>) -> usize {
     match arg.map(|arg| arg.parse::<usize>()) {
         Some(Ok(n)) => n,
-        Some(_) => num_cpus::get(),
-        None => 1,
+        _ => 2 * num_cpus::get_physical(),
     }
 }
 
@@ -198,6 +195,6 @@ fn poll_delay(arg: Option<&str>, num_threads: usize) -> Option<usize> {
         Some(Ok(n)) => Some(n),
         Some(_) => None,
         None if num_threads == 1 => None,
-        _ => Some(1),
+        _ => Some(100),
     }
 }
